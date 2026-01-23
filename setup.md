@@ -1,8 +1,8 @@
 ### Domains:
 
-##### Server surf-tg https Url: https://comm-coaching-thesis-forgot.trycloudflare.com
-##### Addon Stremio https Url: https://print-config-katie-convicted.trycloudflare.com
-##### Addon installtion Url: https://spots-mba-universal-defence.trycloudflare.com/manifest.json
+##### Server surf-tg https Url: https://comm-coaching-thesis-forgot.trycloudflare.com // Or https domain from cloudflared tunnel port 8080
+##### Addon Stremio https Url: https://print-config-katie-convicted.trycloudflare.com // Or https domain from cloudflared tunnel port 7000
+##### Addon installtion Url: https://print-config-katie-convicted.trycloudflare.com/manifest.json // replace for your domain 
 
 ### Commands to run:
 ##### server: docker compose up -d / docker compose up --build --force-recreate //after changes
