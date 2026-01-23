@@ -40,10 +40,13 @@ def clean_hebrew_title(text):
         r"דב סרטים",
         r"שלמה סרטים",
         r"ע י",
+        r"ת מ",
         r"הועלה",
         r"לולו סרטים",
         r"שבי גוזלן",
-        r"למבורגיני"
+        r"למבורגיני",
+        r"גוזלן"
+        
     ]
     for group in groups:
         text = re.sub(group, "", text)
@@ -51,6 +54,8 @@ def clean_hebrew_title(text):
     text = re.sub(r"ע(ונה)?\s?\d*\b", "", text)
     text = re.sub(r"פ(רק)?\s?\d*\b", "", text)
     text = re.sub(r"s\d{1,2}e\d{1,2}", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"ע\d+", " ", text)
+    text = re.sub(r"פ\d+", " ", text)
     # 5. Clean up quotes and extra spaces
     text = text.replace('"', "").replace("'", "").strip()
     text = re.sub(r"\s+", " ", text)
@@ -76,7 +81,6 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                 if file := message.video or message.document:
                     raw_fn = file.file_name or ""
                     title, _ = splitext(raw_fn)
-                    print(f"raw file name get messages: {title}")
                     is_default = any(
                         x in title.lower()
                         for x in ["default_name", "default name", "undefined", "index"]
@@ -84,35 +88,26 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                     if not is_default and title:
                         # Priority A: Original File Name (if it's not generic)
                         title = clean_hebrew_title(title)
-                        print(f"title after clean, get messages: {title}")
                         if len(title) > 33:
                             title = title[:33]
                             if " " in title:
                                 title = title.rsplit(" ", 1)[0]
-                                print(f"Using File Name from index.py: {title}", flush=True) 
                         title = clean_hebrew_title(title)
-                        print(f"title from file name after cleaning (get messages): {title}")    
                     elif message.caption:
-                        print(f"using captions from get messages: {message.caption}")
                         # Priority B: Hebrew Caption (limited to 30 chars)
                         clean_caption = message.caption.strip().split("\n")[
                             0
                         ]  # Take first line only
-                        print(f"title from catption before clean: {clean_caption}")
                         clean_caption = clean_hebrew_title(clean_caption)
-                        print(f"title from catption after clean: {clean_caption}")
                         if len(clean_caption) > 33:
                             clean_caption = clean_caption[:33]
-                            print(f"title from catption after slice: {clean_caption}")
                             if " " in clean_caption:
                                 title = clean_caption.rsplit(" ", 1)[0]
-                                print(f"Using Caption Snippet from index.py: {title}", flush=True)
                                 # 2. Last resort fallback if both above failed
                             else:
                                 title = clean_caption
                         else: 
                             title = clean_caption
-                    print(f"last check if title is good from get messages: {title}")
                     if not title:
                         title = f"Video {message.id}"
                     if message.caption:
@@ -170,7 +165,6 @@ async def get_files(chat_id, page=1):
                 title = title[:33]
                 if " " in title:
                     title = title.rsplit(" ", 1)[0]
-            print(f"Using File Name: {title}", flush=True)
         elif post.caption:
             # Priority B: Hebrew Caption (limited to 30 chars)
             clean_caption = post.caption.strip().split("\n")[0]  # Take first line only
@@ -180,7 +174,6 @@ async def get_files(chat_id, page=1):
             else:
                 clean_caption = clean_hebrew_title(clean_caption)
                 title = clean_caption
-            print(f"Using Caption Snippet: {title}", flush=True)
         # 2. Last resort fallback if both above failed
         if not title:
             title = f"Video {post.id}"
@@ -199,7 +192,6 @@ async def get_files(chat_id, page=1):
             poster_url = (
                 f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
             )
-        print(f"File title before saved from index.py: {title}", flush=True)
         posts.append(
             {
                 "msg_id": post.id,

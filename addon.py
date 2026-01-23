@@ -27,7 +27,7 @@ if not DATABASE_URL:
 MONGODB_URI = f"{DATABASE_URL}/surftg"
 SURF_TG_BASE_URL = os.getenv("BASE_URL", "http://localhost:8080")
 ADDON_NAME = os.getenv("ADDON_NAME", "My Hebrew Videos")
-AUTH_CHANNEL = os.getenv("AUTH_CHANNEL", "-1003525442643")
+AUTH_CHANNEL = os.getenv("AUTH_CHANNEL", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 
 # Connect to MongoDB
@@ -174,42 +174,6 @@ def generate_stream_url(video_doc):
     return stream_url
 
 
-def video_to_meta2(video_doc):
-    """Convert MongoDB video document to Stremio meta format"""
-
-    # Get msg_id as string
-    msg_id = str(video_doc.get("msg_id", ""))
-    chat_id = str(video_doc.get("chat_id", "")).replace("-100", "")
-
-    # Create stremio ID
-    stremio_id = f"surftg_{msg_id}"
-
-    # Get title - if it's "Default Name", make it more descriptive
-    title = video_doc.get("title", "Unknown Video")
-    if title == "Default Name":
-        # Use size and type to make it more identifiable
-        size = video_doc.get("size", "")
-        title = f"Video {msg_id} ({size})"
-
-    caption = video_doc.get("description") or video_doc.get("caption") or ""
-    size = video_doc.get("size", "Unknown size")
-
-    # Combine them for a nice Stremio look
-    # Stremio supports newlines (\n) in the description!
-    final_description = f"{caption}\n\n📁 Size: {size}"
-    # Placeholder poster
-    thumb = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={msg_id}"
-
-    return {
-        "id": stremio_id,
-        "type": "movie",
-        "name": title,
-        "poster": thumb,
-        "description": f"{final_description}\nMessage ID: {msg_id}\nSize: {video_doc.get('size', 'Unknown')}\nType: {video_doc.get('type', 'video')}",
-        "behaviorHints": {"defaultVideoId": stremio_id},
-    }
-
-
 def video_to_meta(video_doc):
     msg_id = str(video_doc.get("msg_id", ""))
     chat_id = str(video_doc.get("chat_id", AUTH_CHANNEL)).replace("-100", "")
@@ -271,18 +235,6 @@ def video_to_meta(video_doc):
 # ========== STREMIO ROUTES ==========
 
 
-async def manifest2(request):
-    """Return addon manifest"""
-    print("Manifest requested")
-    return JSONResponse(
-        MANIFEST,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
-    )
-
-
 async def manifest(request):
     """Return addon manifest"""
     print("Manifest requested")
@@ -295,69 +247,6 @@ async def manifest(request):
             "ngrok-skip-browser-warning": "true",
         },
     )
-
-
-async def meta2(request):
-    """Return metadata for a specific video - Stremio requires this!"""
-    try:
-        video_type = request.path_params["type"]
-        video_id = request.path_params["id"]
-
-        print(f"\n{'='*60}")
-        print(f"META REQUEST")
-        print(f"Type: {video_type}")
-        print(f"ID: {video_id}")
-        print(f"{'='*60}")
-
-        # Extract msg_id
-        if video_id.startswith("surftg_"):
-            msg_id_str = video_id.replace("surftg_", "")
-        else:
-            msg_id_str = video_id
-
-        # Find collection
-        collection_name = find_video_collection()
-        if not collection_name:
-            return JSONResponse({"meta": {}})
-
-        collection = db[collection_name]
-
-        # Find video (msg_id can be string or int)
-        video_doc = collection.find_one({"msg_id": msg_id_str})
-
-        # Try as integer if not found
-        if not video_doc:
-            try:
-                msg_id_int = int(msg_id_str)
-                video_doc = collection.find_one({"msg_id": msg_id_int})
-                if video_doc:
-                    print(f"✅ Found as integer: {msg_id_int}")
-            except:
-                pass
-
-        if not video_doc:
-            print(f"❌ Video not found: {msg_id_str}")
-            return JSONResponse({"meta": {}})
-
-        print(f"✅ Found video: {video_doc.get('title')}")
-
-        meta = video_to_meta(video_doc)
-
-        return JSONResponse(
-            {"meta": meta},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            },
-        )
-
-    except Exception as e:
-        print(f"❌ Error in meta: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return JSONResponse({"meta": {}})
 
 
 async def meta(request):
@@ -375,59 +264,6 @@ async def meta(request):
     return JSONResponse(
         {"meta": video_to_meta(video_doc)}, headers={"Access-Control-Allow-Origin": "*"}
     )
-
-
-async def catalog2(request):
-    """Return catalog of all videos"""
-    try:
-        search_query = request.query_params.get("search")
-        skip = int(request.query_params.get("skip", 0))
-
-        print(f"\n{'='*60}")
-        print(f"CATALOG REQUEST")
-        print(f"Skip: {skip}")
-        print(f"Request from: {request.client.host if request.client else 'unknown'}")
-        print(f"\nCATALOG REQUEST | Search: {search_query} | Skip: {skip}")
-        print(f"{'='*60}")
-
-        videos = get_all_videos(skip=skip, limit=100)
-
-        print(f"Retrieved {len(videos)} videos from database")
-
-        if not videos:
-            print("⚠️  WARNING: No videos found in database!")
-            print("Check if MongoDB connection is working")
-
-        if search_query:
-            query = {
-                "$or": [
-                    {"title": {"$regex": search_query, "$options": "i"}},
-                    {"description": {"$regex": search_query, "$options": "i"}},
-                    {"caption": {"$regex": search_query, "$options": "i"}},
-                ]
-            }
-
-        metas = [video_to_meta(v) for v in videos]
-
-        print(f"Returning {len(metas)} metas to Stremio")
-        print(f"{'='*60}\n")
-
-        return JSONResponse(
-            {"metas": metas, "moreAvailable": len(metas) == 100},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                "ngrok-skip-browser-warning": "true",
-            },
-        )
-
-    except Exception as e:
-        print(f"❌ ERROR in catalog: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return JSONResponse({"metas": []})
 
 
 async def catalog(request):

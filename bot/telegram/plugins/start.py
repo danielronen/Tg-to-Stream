@@ -80,29 +80,25 @@ async def file_receive_handler(bot: Client, message: Message):
     # ... (keep your AUTH_CHANNEL check code) ...
     if str(channel_id):
         try:
+            title = None
             file = message.video or message.document
             msg_id = message.id
 
             # --- IMPROVED TITLE LOGIC ---
-            raw_fn = file.file_name
+            raw_fn = file.file_name or ""
+            title, _ = splitext(raw_fn)
             is_default = any(
-                x in raw_fn.lower()
+                x in title.lower()
                 for x in ["default_name", "default name", "undefined"]
             )
-
-            if not is_default and raw_fn:
+            if not is_default and title:
                 # Priority A: Original File Name (if it's not generic)
-                print(f"file name before clean from start.py: {raw_fn}")
-                title, _ = splitext(raw_fn)
                 title = clean_hebrew_title(title)
-                print(f"title after clean from start.py: {title}")
                 if len(title) > 33:
-                    print(f"title before slice from start.py {title}")
                     title = title[:33]
-                    print(f"title before slice from start.py {title}")
                     if " " in title:
                         title = title.rsplit(" ", 1)[0]
-                        print(f"Using File Name from start.py: {title}", flush=True)
+                #title = clean_hebrew_title(title)
             elif message.caption:
                 # Priority B: Hebrew Caption (limited to 30 chars)
                 clean_caption = message.caption.strip().split("\n")[
@@ -113,21 +109,15 @@ async def file_receive_handler(bot: Client, message: Message):
                     clean_caption = clean_caption[:33]
                     if " " in clean_caption:
                         title = clean_caption.rsplit(" ", 1)[0]
-                        print(f"Using Caption Snippet: {title}", flush=True)
+                    else:
+                        title = clean_caption
                         # 2. Last resort fallback if both above failed
+                else:
+                    title = clean_caption
             if not title:
                 title = f"Video {message.id}"
-            # Clean title for DB
-            title = re.sub(r"[|_-]", " ", title)
-            title = re.sub(r"\s+", " ", title).strip()
-            title = clean_hebrew_title(title)
-            if len(title) > 50:  # Increased from 30 to help TMDB find specific shows
-                title = title[:50]
-                print(f"title from start.py last resort: {title}")
-
             # --- NEW POSTER LOGIC ---
             has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-
             if has_real_thumb:
                 # Use the local proxy URL for real Telegram thumbs
                 poster_url = (
@@ -139,20 +129,15 @@ async def file_receive_handler(bot: Client, message: Message):
                 poster_url = (
                     f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
                 )
-
             full_desc = (
                 message.caption.strip()
                 if message.caption
-                else "No description available."
+                else file.file_name.strip()
             )
             hash = file.file_unique_id[:6]
             size = get_readable_file_size(file.file_size)
             mime_type = file.mime_type
 
-            # --- CRITICAL: Update your Database call ---
-            # Ensure your db.add_tgfiles function accepts the poster_url!
-            # If your database helper doesn't support the extra argument,
-            # you might need to update bot/helper/database.py as well.
             await db.add_tgfiles(
                 str(channel_id),
                 msg_id,
@@ -161,7 +146,7 @@ async def file_receive_handler(bot: Client, message: Message):
                 str(full_desc),
                 str(size),
                 str(mime_type),
-                img=poster_url,  # <--- ADD THIS
+                img=poster_url, 
             )
 
             print(f"Saved {title} with poster: {poster_url}", flush=True)
