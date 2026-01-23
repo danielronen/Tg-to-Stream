@@ -38,7 +38,7 @@ print(f"Connected to database: {db.name}")
 
 # Cache for collection name
 _VIDEO_COLLECTION = None
-
+_TMDB_CACHE = {}
 # ========== STREMIO MANIFEST ==========
 MANIFEST = {
     "id": "community.surftg.simple",
@@ -61,6 +61,125 @@ MANIFEST = {
 
 # ========== HELPER FUNCTIONS ==========
 
+
+
+def get_tmdb_poster2(title, tmdb_api_key):
+    """
+    Search TMDB for a title and return the poster URL.
+    Returns None if no poster is found.
+    """
+    if not tmdb_api_key:
+        return None
+    if title in _TMDB_CACHE:
+        print(f"💾 Using cached TMDB result for '{title}'")
+        return _TMDB_CACHE[title]
+    try:
+        # Search for the title on TMDB (multi search for movies/TV)
+        search_url = f"https://api.themoviedb.org/3/search/multi"
+        params = {
+            "api_key": tmdb_api_key,
+            "query": title,
+            "language": "he-IL",  # Hebrew preference
+            "include_adult": "false"
+        }
+        
+        print(f"🔍 Searching TMDB for: '{title}'")
+        response = httpx.get(search_url, params=params, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Get the first result
+        if data.get("results") and len(data["results"]) > 0:
+            result = data["results"][0]
+            poster_path = result.get("poster_path")
+            
+            if poster_path:
+                # TMDB poster base URL (w500 is a good size for Stremio)
+                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                print(f"✅ Found TMDB poster for '{title}': {poster_url}")
+                _TMDB_CACHE[title] = poster_url
+                return poster_url
+            else:
+                print(f"⚠️ No poster found for '{title}' on TMDB")
+                _TMDB_CACHE[title] = None
+                return None
+        else:
+            print(f"⚠️ No results found for '{title}' on TMDB")
+            _TMDB_CACHE[title] = None
+            return None
+            
+    except httpx.TimeoutException:
+        print(f"⏱️ TMDB request timeout for '{title}'")
+        return None
+    except httpx.HTTPError as e:
+        print(f"❌ TMDB HTTP error for '{title}': {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching TMDB poster for '{title}': {e}")
+        return None
+
+def get_tmdb_poster(title, tmdb_api_key):
+    """
+    Search TMDB for a title and return the poster URL.
+    Returns None if no poster is found.
+    """
+    if not tmdb_api_key:
+        print("⚠️ TMDB_API_KEY not configured")
+        return None
+    
+    # Check cache first
+    if title in _TMDB_CACHE:
+        print(f"💾 Using cached TMDB result for '{title}'")
+        return _TMDB_CACHE[title]
+    
+    try:
+        # Clean up title for better search results
+        #clean_title = title.replace("_", " ").strip()
+        
+        # Search for the title on TMDB (multi search for movies/TV)
+        search_url = "https://api.themoviedb.org/3/search/multi"
+        params = {
+            "api_key": tmdb_api_key,
+            "query": title,
+            "language": "he-IL",  # Hebrew preference
+            "include_adult": "false"
+        }
+        
+        print(f"🔍 Searching TMDB for: '{title}'")
+        response = httpx.get(search_url, params=params, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Get the first result
+        if data.get("results") and len(data["results"]) > 0:
+            result = data["results"][0]
+            poster_path = result.get("poster_path")
+            
+            if poster_path:
+                # TMDB poster base URL (w500 is a good size for Stremio)
+                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                print(f"✅ Found TMDB poster for '{title}': {poster_url}")
+                # Cache the result
+                _TMDB_CACHE[title] = poster_url
+                return poster_url
+            else:
+                print(f"⚠️ TMDB result has no poster for '{title}'")
+                _TMDB_CACHE[title] = None
+                return None
+        else:
+            print(f"⚠️ No TMDB results for '{title}'")
+            _TMDB_CACHE[title] = None
+            return None
+            
+    except httpx.TimeoutException:
+        print(f"⏱️ TMDB request timeout for '{title}'")
+        return None
+    except httpx.HTTPError as e:
+        print(f"❌ TMDB HTTP error for '{title}': {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching TMDB poster for '{title}': {e}")
+        return None
 
 def find_video_collection():
     """Auto-detect which collection has video files"""
@@ -143,15 +262,12 @@ def generate_stream_url(video_doc):
     chat_id = video_doc.get("chat_id", AUTH_CHANNEL)
     hash_value = video_doc.get("hash", "")
     title = video_doc.get("title", "video")
-
     # Remove -100 prefix from chat_id
     chat_id_clean = str(chat_id).replace("-100", "")
-
     # Extract/generate filename from title
     filename = title.replace(" ", "_")
     # Keep only safe characters
     filename = re.sub(r"[^\w\-_\.]", "_", filename)
-
     # Add extension if not present
     if not any(
         filename.lower().endswith(ext)
@@ -164,64 +280,48 @@ def generate_stream_url(video_doc):
             filename += ".mp4"
         else:
             filename += ".mkv"
-
     # URL encode the filename
     filename_encoded = quote(filename, safe="")
-
     # Build the URL
     stream_url = f"{SURF_TG_BASE_URL}/{chat_id_clean}/{filename_encoded}?id={msg_id}&hash={hash_value}"
-
+    
     return stream_url
 
+def check_thumbnail_exists(thumbnail_url, timeout=2.0):
+    """
+    Quickly check if a Telegram thumbnail URL is accessible.
+    Returns True if accessible, False otherwise.
+    """
+    try:
+        # Make a HEAD request (faster than GET, just checks if URL exists)
+        response = httpx.head(thumbnail_url, timeout=timeout, follow_redirects=True)
+        # Check if successful and not an error page
+        return response.status_code == 200
+    except:
+        return False
 
-def video_to_meta(video_doc):
+def video_to_meta1(video_doc):
     msg_id = str(video_doc.get("msg_id", ""))
     chat_id = str(video_doc.get("chat_id", AUTH_CHANNEL)).replace("-100", "")
     stremio_id = f"surftg_{msg_id}"
-
     title = video_doc.get("title", f"Video {msg_id}")
     caption = video_doc.get("description") or video_doc.get("caption") or ""
-
     # FIX: Ensure BASE_URL doesn't end with a slash to avoid // in URL
     img = video_doc.get("img")
-    print(f"img url: {img}")
-    if img == f"/api/thumb/{chat_id}?id={msg_id}":
+    poster_url = None
+    if img and img == f"/api/thumb/{chat_id}?id={msg_id}":
         poster_url = f"{SURF_TG_BASE_URL}/api/thumb/-100{chat_id}?id={msg_id}"
-        print(f"poster_url1: {poster_url}")
+        print(f"poster_url using thumbnail: {poster_url}")
     else:
-        # Clean the title for better search results
-        clean_title = re.sub(
-            r"\b(1080p|720p|WEB-?DL|HDTV|WEB|x264|x265|HEVC)\b",
-            "",
-            title,
-            flags=re.IGNORECASE,
-        )
-        groups = ["זירה מדיה", "ז\.מ", "דב סרטים", "שלמה סרטים", "תוצרת קוריאה"]
-        for group in groups:
-            clean_title = re.sub(group, "", clean_title)
-        # 3. Extract Season/Episode info but remove it from the title search
-        # Matches: ע1 פ1, עונה 1, פרק 1
-        clean_title = re.sub(r"ע(ונה)?\s?\d+", "", clean_title)
-        clean_title = re.sub(r"פ(רק)?\s?\d+", "", clean_title)
-
-        # 4. Remove dashes, quotes and extra spaces
-        clean_title = clean_title.replace('"', "").replace("-", " ").strip()
-
-        # 5. Clean up multiple spaces
-        clean_title = re.sub(r"\s+", " ", clean_title)
-
+        #search on TMDB for poster
         # Search with Hebrew preference
-        url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={quote(clean_title)}&language=he-IL"
-        print(url)
-        if url:
-            poster_url = url
-        else:
-            poster_url = video_doc.get("img")
-        print(f"poster_url2: {poster_url}")
-
-    # FALLBACK: If thumbnail fails, use a generic movie poster icon
-    # Stremio sometimes requires a valid image extension like .jpg at the end
-    # + "&format=jpg"
+        #url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={quote(title)}&language=he-IL"
+        print(f"search for poster from TMDB: {title}")
+        poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+        print(f"poster url from TMDB: {poster_url}")
+        if not poster_url:
+            poster_url = img
+    print(f"poster url as saved: {poster_url}")
     return {
         "id": stremio_id,
         "type": "movie",
@@ -231,6 +331,103 @@ def video_to_meta(video_doc):
         "behaviorHints": {"defaultVideoId": stremio_id},
     }
 
+def video_to_meta2(video_doc):
+    """Convert video document to Stremio meta format with TMDB poster support"""
+    msg_id = str(video_doc.get("msg_id", ""))
+    chat_id = str(video_doc.get("chat_id", AUTH_CHANNEL)).replace("-100", "")
+    stremio_id = f"surftg_{msg_id}"
+    title = video_doc.get("title", f"Video {msg_id}")
+    caption = video_doc.get("description") or video_doc.get("caption") or ""
+    
+    # Get thumbnail/poster URL
+    img = video_doc.get("img")
+    poster_url = None
+    use_telegram_thumb = False
+    
+    # Strategy: Try TMDB first for better quality posters, fallback to Telegram thumbnail
+    
+    # First, check if we should even try Telegram thumbnail
+    if img and img == f"/api/thumb/{chat_id}?id={msg_id}":
+        # Mark that we have a Telegram thumbnail available (as fallback)
+        use_telegram_thumb = True
+    elif img and img.startswith("http"):
+        # Use existing full URL thumbnail directly
+        poster_url = img
+        print(f"📸 Using existing thumbnail URL: {poster_url}")
+    
+    # If no direct URL, try TMDB first
+    if not poster_url:
+        print(f"🎬 Attempting TMDB lookup for: '{title}'")
+        poster_url = get_tmdb_poster(title, TMDB_API_KEY)
+    
+    # If TMDB failed and we have a Telegram thumbnail, try that
+    if not poster_url and use_telegram_thumb:
+        telegram_thumb_url = f"{SURF_TG_BASE_URL}/api/thumb/-100{chat_id}?id={msg_id}"
+        print(f"📸 TMDB failed, trying Telegram thumbnail: {telegram_thumb_url}")
+        
+        # Quick check if Telegram thumbnail is accessible (don't wait for errors)
+        try:
+            # Just set it - Stremio will handle if it fails
+            poster_url = telegram_thumb_url
+        except Exception as e:
+            print(f"⚠️ Telegram thumbnail may not be available: {e}")
+    
+    # Final fallback: use a placeholder
+    if not poster_url:
+        poster_url = "https://via.placeholder.com/300x450/1a1a1a/ffffff?text=No+Poster"
+        print(f"📭 Using placeholder for '{title}'")
+    
+    return {
+        "id": stremio_id,
+        "type": "movie",
+        "name": title,
+        "poster": poster_url,
+        "description": f"{caption}\n\nSize: {video_doc.get('size', 'Unknown')}",
+        "behaviorHints": {"defaultVideoId": stremio_id},
+    }
+
+def video_to_meta(video_doc):
+    """Convert video document to Stremio meta format - Telegram thumbnail OR TMDB poster"""
+    msg_id = str(video_doc.get("msg_id", ""))
+    chat_id = str(video_doc.get("chat_id", AUTH_CHANNEL)).replace("-100", "")
+    stremio_id = f"surftg_{msg_id}"
+    title = video_doc.get("title", f"Video {msg_id}")
+    caption = video_doc.get("description") or video_doc.get("caption") or ""
+    
+    # Get thumbnail/poster URL
+    img = video_doc.get("img")
+    poster_url = None
+    
+    # OPTION 1: Try Telegram thumbnail (if img field indicates it exists)
+    if img and img == f"/api/thumb/{chat_id}?id={msg_id}":
+        telegram_thumb_url = f"{SURF_TG_BASE_URL}/api/thumb/-100{chat_id}?id={msg_id}"
+        
+        # Validate that thumbnail actually works
+        print(f"🔍 Checking if Telegram thumbnail exists for: '{title}'")
+        if check_thumbnail_exists(telegram_thumb_url):
+            poster_url = telegram_thumb_url
+            print(f"✅ Telegram thumbnail accessible: '{title}'")
+        else:
+            print(f"⚠️ Telegram thumbnail failed (PEER_ID_INVALID likely): '{title}'")
+    
+    # OPTION 2: TMDB poster (if no thumbnail or thumbnail check failed)
+    if not poster_url:
+        print(f"🎬 Searching TMDB for: '{title}'")
+        poster_url = get_tmdb_poster(title, TMDB_API_KEY)
+        
+        if poster_url:
+            print(f"✅ Using TMDB poster for: '{title}'")
+        else:
+            print(f"❌ No poster available for: '{title}'")
+    
+    return {
+        "id": stremio_id,
+        "type": "movie",
+        "name": title,
+        "poster": poster_url,  # Can be None if both options fail
+        "description": f"{caption}\n\nSize: {video_doc.get('size', 'Unknown')}",
+        "behaviorHints": {"defaultVideoId": stremio_id},
+    }
 
 # ========== STREMIO ROUTES ==========
 
@@ -273,16 +470,13 @@ async def catalog(request):
         # Example URL: /catalog/movie/surftg_all_videos/search=avatar.json
         extra_str = request.path_params.get("extra", "")
         search_query = None
-
         if "search=" in extra_str:
             search_query = extra_str.replace("search=", "")
             # Decode URL (e.g., %20 to space)
             search_query = unquote(search_query)
-
         skip = int(request.query_params.get("skip", 0))
         collection_name = find_video_collection()
         collection = db[collection_name]
-
         if search_query:
             print(f"🔍 Searching for: {search_query}")
             query = {
@@ -301,7 +495,7 @@ async def catalog(request):
                 .skip(skip)
                 .limit(100)
             )
-
+            
         videos = list(cursor)
         metas = [video_to_meta(v) for v in videos]
 
