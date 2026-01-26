@@ -38,7 +38,6 @@ print(f"Connected to database: {db.name}")
 
 # Cache for collection name
 _VIDEO_COLLECTION = None
-_TMDB_CACHE = {}
 # ========== STREMIO MANIFEST ==========
 MANIFEST = {
     "id": "community.surftg.simple",

@@ -63,20 +63,6 @@ def get_tmdb_poster(title, tmdb_api_key):
         print(f"❌ Error fetching TMDB poster for '{title}': {e}")
         return None
 
-def check_thumbnail_exists(thumbnail_url, timeout=2.0):
-    """
-    Quickly check if a Telegram thumbnail URL is accessible.
-    Returns True if accessible, False otherwise.
-    """
-    print(f"checks tumbnail url: {thumbnail_url}")
-    try:
-        # Make a HEAD request (faster than GET, just checks if URL exists)
-        response = httpx.head(thumbnail_url, timeout=timeout, follow_redirects=True)
-        # Check if successful and not an error page
-        return response.status_code == 200
-    except:
-        return False
-
 async def fetch_message(chat_id, message_id):
     try:
         message = await StreamBot.get_messages(chat_id, message_id)
@@ -135,7 +121,6 @@ def clean_hebrew_title(text):
     text = re.sub(r"\s+", " ", text)
     
     return text
-
 
 async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50):
     messages = []
@@ -220,7 +205,6 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
         current_message_id += batch_size
     return messages
 
-
 async def get_files(chat_id, page=1):
     if Telegram.SESSION_STRING == "":
         return await db.list_tgfiles(id=chat_id, page=page)
@@ -287,7 +271,6 @@ async def get_files(chat_id, page=1):
         )
     save_cache(chat_id, {"posts": posts}, page)
     return posts
-
 
 async def posts_file(posts, chat_id):
     phtml = """

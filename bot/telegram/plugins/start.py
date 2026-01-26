@@ -19,6 +19,11 @@ from dotenv import load_dotenv
 load_dotenv("config.env")
 SURF_TG_BASE_URL = os.getenv("BASE_URL", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+SOURCE_CHANNELS_STR = os.getenv("GROUPS_AND_CHANNELS", "")
+SOURCE_CHANNELS = [
+    int(ch.strip()) for ch in SOURCE_CHANNELS_STR.split(",") if ch.strip()
+]
+
 
 db = Database()
 
@@ -102,7 +107,7 @@ async def file_receive_handler(bot: Client, message: Message):
                     title = title[:33]
                     if " " in title:
                         title = title.rsplit(" ", 1)[0]
-                #title = clean_hebrew_title(title)
+                # title = clean_hebrew_title(title)
             elif message.caption:
                 # Priority B: Hebrew Caption (limited to 30 chars)
                 clean_caption = message.caption.strip().split("\n")[
@@ -124,21 +129,23 @@ async def file_receive_handler(bot: Client, message: Message):
             if message.video:
                 has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                 if has_real_thumb:
-                    poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                    poster_url = (
+                        f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                    )
                 else:
-                    poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+                    poster_url = get_tmdb_poster(title, TMDB_API_KEY)
             elif message.document:
-                poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+                poster_url = get_tmdb_poster(title, TMDB_API_KEY)
             if not poster_url:
                 # Fallback to Hebrew Placeholder
                 clean_t = quote(title)
-                poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"            
-                
+                poster_url = (
+                    f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                )
+
             # --- Description ---
             full_desc = (
-                message.caption.strip()
-                if message.caption
-                else file.file_name.strip()
+                message.caption.strip() if message.caption else file.file_name.strip()
             )
             hash = file.file_unique_id[:6]
             size = get_readable_file_size(file.file_size)
@@ -152,53 +159,44 @@ async def file_receive_handler(bot: Client, message: Message):
                 str(full_desc),
                 str(size),
                 str(mime_type),
-                img=poster_url, 
+                img=poster_url,
             )
-
 
         except Exception as e:
             print(f"Error in file_receive_handler: {e}", flush=True)
 
-@UserBot.on_message(filters.chat([-1002655377990]))
+
+@UserBot.on_message(filters.chat(SOURCE_CHANNELS))
 async def forward_videos_to_target(bot: Client, message: Message):
-    print(f"🔔 RECEIVED MESSAGE from {message.chat.id} - Type: {message.media}")
-    print(f"   Has video: {message.video is not None}")
-    print(f"   Has document: {message.document is not None}")
-    
     try:
         # Get target channel
         AUTH_CHANNEL = await db.get_variable("auth_channel")
         if AUTH_CHANNEL is None or AUTH_CHANNEL.strip() == "":
             AUTH_CHANNEL = Telegram.AUTH_CHANNEL
-        
-        target = AUTH_CHANNEL.split(",")[0].strip() if isinstance(AUTH_CHANNEL, str) else str(AUTH_CHANNEL[0])
+
+        target = (
+            AUTH_CHANNEL.split(",")[0].strip()
+            if isinstance(AUTH_CHANNEL, str)
+            else str(AUTH_CHANNEL[0])
+        )
         target_id = int(target)
-        
-        print(f"   Target channel: {target_id}")
-        
         # Check if it's a video or video document
         should_forward = False
-        
         if message.video:
             should_forward = True
-            print("   ✓ Is a video")
         elif message.document:
             mime_type = message.document.mime_type or ""
             file_name = message.document.file_name or ""
-            print(f"   Document MIME: {mime_type}, Name: {file_name}")
-            
-            if mime_type.startswith("video/") or file_name.endswith(('.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv')):
+            if mime_type.startswith("video/") or file_name.endswith(
+                (".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv")
+            ):
                 should_forward = True
-                print("   ✓ Is a video document")
-        
+                
         if should_forward:
             await message.forward(target_id)
-            print(f"   ✅ FORWARDED to {target_id}")
-        else:
-            print("   ⏭️ Not a video, skipping")
-                
+
     except Exception as e:
         print(f"   ❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
-        

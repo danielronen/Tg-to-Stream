@@ -1,7 +1,6 @@
 .venv
 log.txt
 config.env
-/cache/
 **/__pycache__/
 *.session
 *.session-journal
@@ -9,4 +8,4 @@ config.env
 *.session-wal
 /.vscode/
 /bot/downloads/
-try.py
+/cache/
