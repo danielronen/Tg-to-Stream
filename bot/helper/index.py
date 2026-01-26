@@ -21,55 +21,35 @@ db = Database()
 
 
 def get_tmdb_poster(title, tmdb_api_key):
-    """
-    Search TMDB for a title and return the poster URL.
-    Returns None if no poster is found.
-    """
     if not tmdb_api_key:
-        print("⚠️ TMDB_API_KEY not configured")
         return None
-    
-    # Check cache first
     if title in _TMDB_CACHE:
-        print(f"💾 Using cached TMDB result for '{title}'")
         return _TMDB_CACHE[title]
-    
     try:
-        # Clean up title for better search results
-        #clean_title = title.replace("_", " ").strip()
-        
-        # Search for the title on TMDB (multi search for movies/TV)
         search_url = "https://api.themoviedb.org/3/search/multi"
         params = {
             "api_key": tmdb_api_key,
             "query": title,
-            "language": "he-IL",  # Hebrew preference
+            "language": "he-IL",
             "include_adult": "false"
         }
-        
-        print(f"🔍 Searching TMDB for: '{title}'")
         response = httpx.get(search_url, params=params, timeout=10.0)
         response.raise_for_status()
         data = response.json()
-        
-        # Get the first result
+
         if data.get("results") and len(data["results"]) > 0:
             result = data["results"][0]
             poster_path = result.get("poster_path")
-            
             if poster_path:
                 # TMDB poster base URL (w500 is a good size for Stremio)
                 poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
-                print(f"✅ Found TMDB poster for '{title}': {poster_url}")
                 # Cache the result
                 _TMDB_CACHE[title] = poster_url
                 return poster_url
             else:
-                print(f"⚠️ TMDB result has no poster for '{title}'")
                 _TMDB_CACHE[title] = None
                 return None
         else:
-            print(f"⚠️ No TMDB results for '{title}'")
             _TMDB_CACHE[title] = None
             return None
             
@@ -113,11 +93,15 @@ def clean_hebrew_title(text):
     text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
     # 2. Remove common English technical tags (Removed \b to be more aggressive)
     text = re.sub(
-        r"(1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|ENG|HB|HEVC|DL|Rw|heb)",
+        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|ENG|HB|HEVC|DL|Rw|heb|ח\s?\d+)",
         "",
         text,
         flags=re.IGNORECASE,
     )
+    # 3. Remove Dates (Handles 23 01 26 or 2023 01 26)
+    # This looks for sequences of 2-4 digits separated by spaces
+    text = re.sub(r"\b\d{2,4}\s\d{2}\s\d{2}\b", "", text)
+    text = re.sub(r"\b(19|20)\d{2}\b", "", text)
     # 3. Remove Hebrew Uploader/Group tags
     # Added common variations like brackets
     groups = [
@@ -132,14 +116,17 @@ def clean_hebrew_title(text):
         r"שבי גוזלן",
         r"למבורגיני",
         r"גוזלן",
-        r"נתי מדיה"
-        
+        r"נתי מדיה",
+        r"איכות ערוץ",
+        r"צפייה ישירה",
+        r"איכות"
+    
     ]
     for group in groups:
         text = re.sub(group, "", text)
     # 4. Remove Season/Episode info
-    text = re.sub(r"ע(ונה)?\s?\d*\b", "", text)
-    text = re.sub(r"פ(רק)?\s?\d*\b", "", text)
+    text = re.sub(r"\bע(ונה)?\s?\d*\b", "", text)
+    text = re.sub(r"\bפ(רק)?\s?\d*\b", "", text)
     text = re.sub(r"s\d{1,2}e\d{1,2}", "", text, flags=re.IGNORECASE)
     text = re.sub(r"ע\d+", " ", text)
     text = re.sub(r"פ\d+", " ", text)
@@ -205,19 +192,15 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                     # ------------------ POSTER LOGIC -------------------------------
                     
                     if message.video:
-                        print(f"this is a video: {title}")
                         has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                         if has_real_thumb:
-                            print(f"has a real thumb")
                             poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
                         else:
                             poster_url = get_tmdb_poster(title,TMDB_API_KEY)
                     elif message.document:
-                        print(f"this is a document: {title}")
                         poster_url = get_tmdb_poster(title,TMDB_API_KEY)
                     if not poster_url:
                         # Fallback to Hebrew Placeholder
-                        print(f"poster not found for {title}")
                         clean_t = quote(title)
                         poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
 

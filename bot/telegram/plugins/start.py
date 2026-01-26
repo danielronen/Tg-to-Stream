@@ -1,9 +1,10 @@
 import re
+import os
 from bot import LOGGER
 from bot.config import Telegram
 from bot.helper.database import Database
 from bot.helper.file_size import get_readable_file_size
-from bot.helper.index import get_messages, clean_hebrew_title
+from bot.helper.index import get_messages, clean_hebrew_title, get_tmdb_poster
 from bot.helper.media import is_media
 from bot.telegram import StreamBot, UserBot
 from pyrogram import filters, Client
@@ -13,7 +14,11 @@ from pyrogram.errors import FloodWait
 from pyrogram.enums.parse_mode import ParseMode
 from asyncio import sleep
 from urllib.parse import quote
+from dotenv import load_dotenv
 
+load_dotenv("config.env")
+SURF_TG_BASE_URL = os.getenv("BASE_URL", "")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 
 db = Database()
 
@@ -78,13 +83,11 @@ async def start(bot: Client, message: Message):
 @StreamBot.on_message(filters.channel & (filters.document | filters.video))
 async def file_receive_handler(bot: Client, message: Message):
     channel_id = message.chat.id
-    # ... (keep your AUTH_CHANNEL check code) ...
     if str(channel_id):
         try:
             title = None
             file = message.video or message.document
             msg_id = message.id
-
             # --- IMPROVED TITLE LOGIC ---
             raw_fn = file.file_name or ""
             title, _ = splitext(raw_fn)
@@ -117,19 +120,20 @@ async def file_receive_handler(bot: Client, message: Message):
                     title = clean_caption
             if not title:
                 title = f"Video {message.id}"
-            # --- NEW POSTER LOGIC ---
-            has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-            if has_real_thumb:
-                # Use the local proxy URL for real Telegram thumbs
-                poster_url = (
-                    f"/api/thumb/{str(channel_id).replace('-100', '')}?id={msg_id}"
-                )
-            else:
+            # --------------------- NEW POSTER LOGIC -----------------------
+            if message.video:
+                has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                if has_real_thumb:
+                    poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                else:
+                    poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+            elif message.document:
+                poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+            if not poster_url:
                 # Fallback to Hebrew Placeholder
                 clean_t = quote(title)
-                poster_url = (
-                    f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                )
+                poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"            
+                
             # --- Description ---
             full_desc = (
                 message.caption.strip()
@@ -151,7 +155,6 @@ async def file_receive_handler(bot: Client, message: Message):
                 img=poster_url, 
             )
 
-            print(f"Saved {title} with poster: {poster_url}", flush=True)
 
         except Exception as e:
             print(f"Error in file_receive_handler: {e}", flush=True)

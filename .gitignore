@@ -8,3 +8,5 @@ config.env
 *.session-shm
 *.session-wal
 /.vscode/
+/bot/downloads/
+try.py
