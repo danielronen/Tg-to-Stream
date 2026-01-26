@@ -1,6 +1,7 @@
 from os.path import splitext
 import re
 import os
+import httpx
 from urllib.parse import quote
 from bot.config import Telegram
 from bot.helper.database import Database
@@ -8,8 +9,93 @@ from bot.telegram import StreamBot, UserBot
 from bot.helper.file_size import get_readable_file_size
 from bot.helper.cache import get_cache, save_cache
 from asyncio import gather
+from dotenv import load_dotenv
+
+load_dotenv("config.env")
+SURF_TG_BASE_URL = os.getenv("BASE_URL", "")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+_TMDB_CACHE = {}
+
 
 db = Database()
+
+
+def get_tmdb_poster(title, tmdb_api_key):
+    """
+    Search TMDB for a title and return the poster URL.
+    Returns None if no poster is found.
+    """
+    if not tmdb_api_key:
+        print("⚠️ TMDB_API_KEY not configured")
+        return None
+    
+    # Check cache first
+    if title in _TMDB_CACHE:
+        print(f"💾 Using cached TMDB result for '{title}'")
+        return _TMDB_CACHE[title]
+    
+    try:
+        # Clean up title for better search results
+        #clean_title = title.replace("_", " ").strip()
+        
+        # Search for the title on TMDB (multi search for movies/TV)
+        search_url = "https://api.themoviedb.org/3/search/multi"
+        params = {
+            "api_key": tmdb_api_key,
+            "query": title,
+            "language": "he-IL",  # Hebrew preference
+            "include_adult": "false"
+        }
+        
+        print(f"🔍 Searching TMDB for: '{title}'")
+        response = httpx.get(search_url, params=params, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Get the first result
+        if data.get("results") and len(data["results"]) > 0:
+            result = data["results"][0]
+            poster_path = result.get("poster_path")
+            
+            if poster_path:
+                # TMDB poster base URL (w500 is a good size for Stremio)
+                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                print(f"✅ Found TMDB poster for '{title}': {poster_url}")
+                # Cache the result
+                _TMDB_CACHE[title] = poster_url
+                return poster_url
+            else:
+                print(f"⚠️ TMDB result has no poster for '{title}'")
+                _TMDB_CACHE[title] = None
+                return None
+        else:
+            print(f"⚠️ No TMDB results for '{title}'")
+            _TMDB_CACHE[title] = None
+            return None
+            
+    except httpx.TimeoutException:
+        print(f"⏱️ TMDB request timeout for '{title}'")
+        return None
+    except httpx.HTTPError as e:
+        print(f"❌ TMDB HTTP error for '{title}': {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching TMDB poster for '{title}': {e}")
+        return None
+
+def check_thumbnail_exists(thumbnail_url, timeout=2.0):
+    """
+    Quickly check if a Telegram thumbnail URL is accessible.
+    Returns True if accessible, False otherwise.
+    """
+    print(f"checks tumbnail url: {thumbnail_url}")
+    try:
+        # Make a HEAD request (faster than GET, just checks if URL exists)
+        response = httpx.head(thumbnail_url, timeout=timeout, follow_redirects=True)
+        # Check if successful and not an error page
+        return response.status_code == 200
+    except:
+        return False
 
 async def fetch_message(chat_id, message_id):
     try:
@@ -115,12 +201,23 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                         full_desc = str(message.caption)
                     else:
                         full_desc = str(raw_fn)
-                    has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-                    if has_real_thumb:
-                        # Use the local proxy URL for real Telegram thumbs
-                        poster_url = f"/api/thumb/{str(chat_id).replace('-100', '')}?id={message.id}"
-                    else:
+                        
+                    # ------------------ POSTER LOGIC -------------------------------
+                    
+                    if message.video:
+                        print(f"this is a video: {title}")
+                        has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                        if has_real_thumb:
+                            print(f"has a real thumb")
+                            poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                        else:
+                            poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+                    elif message.document:
+                        print(f"this is a document: {title}")
+                        poster_url = get_tmdb_poster(title,TMDB_API_KEY)
+                    if not poster_url:
                         # Fallback to Hebrew Placeholder
+                        print(f"poster not found for {title}")
                         clean_t = quote(title)
                         poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
 

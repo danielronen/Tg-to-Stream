@@ -1,7 +1,7 @@
 .venv
 log.txt
 config.env
-cache/
+/cache/
 **/__pycache__/
 *.session
 *.session-journal
