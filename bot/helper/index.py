@@ -45,7 +45,8 @@ def clean_hebrew_title(text):
         r"לולו סרטים",
         r"שבי גוזלן",
         r"למבורגיני",
-        r"גוזלן"
+        r"גוזלן",
+        r"נתי מדיה"
         
     ]
     for group in groups:
