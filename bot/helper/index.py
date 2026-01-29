@@ -22,7 +22,7 @@ db = Database()
 
 def get_tmdb_poster(title, tmdb_api_key):
     if not tmdb_api_key:
-        return None
+        return None, None
     if title in _TMDB_CACHE:
         return _TMDB_CACHE[title]
     try:
@@ -31,7 +31,7 @@ def get_tmdb_poster(title, tmdb_api_key):
             "api_key": tmdb_api_key,
             "query": title,
             "language": "he-IL",
-            "include_adult": "false"
+            "include_adult": "true"
         }
         response = httpx.get(search_url, params=params, timeout=10.0)
         response.raise_for_status()
@@ -40,28 +40,35 @@ def get_tmdb_poster(title, tmdb_api_key):
         if data.get("results") and len(data["results"]) > 0:
             result = data["results"][0]
             poster_path = result.get("poster_path")
+            backdrop_path = result.get("backdrop_path")
             if poster_path:
                 # TMDB poster base URL (w500 is a good size for Stremio)
                 poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                if backdrop_path:
+                    background_url = f"https://image.tmdb.org/t/p/w1280{backdrop_path}"
                 # Cache the result
-                _TMDB_CACHE[title] = poster_url
-                return poster_url
+                    _TMDB_CACHE[title] = poster_url, background_url
+                    return poster_url, background_url
+                else:# In case there is only a poster, use poster as a background
+                    background_url = f"https://image.tmdb.org/t/p/w1280{poster_path}"
+                    _TMDB_CACHE[title] = poster_url, background_url
+                    return poster_url, background_url
             else:
-                _TMDB_CACHE[title] = None
-                return None
+                _TMDB_CACHE[title] = None, None
+                return None, None
         else:
-            _TMDB_CACHE[title] = None
-            return None
+            _TMDB_CACHE[title] = None, None
+            return None, None
             
     except httpx.TimeoutException:
         print(f"⏱️ TMDB request timeout for '{title}'")
-        return None
+        return None, None
     except httpx.HTTPError as e:
         print(f"❌ TMDB HTTP error for '{title}': {e}")
-        return None
+        return None, None
     except Exception as e:
         print(f"❌ Error fetching TMDB poster for '{title}': {e}")
-        return None
+        return None, None
 
 async def fetch_message(chat_id, message_id):
     try:
@@ -79,7 +86,7 @@ def clean_hebrew_title(text):
     text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
     # 2. Remove common English technical tags (Removed \b to be more aggressive)
     text = re.sub(
-        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|ENG|HB|HEVC|DL|Rw|heb|ח\s?\d+)",
+        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|ENG|HB|HEVC|DL|Rw|heb|https?|CD1|CD2|www|com|net|org|ח\s?\d+)",
         "",
         text,
         flags=re.IGNORECASE,
@@ -105,7 +112,10 @@ def clean_hebrew_title(text):
         r"נתי מדיה",
         r"איכות ערוץ",
         r"צפייה ישירה",
-        r"איכות"
+        r"איכות",
+        r"ערוץ",
+        r"Yonidan",
+        r"me ISrTeLeG"
     
     ]
     for group in groups:
@@ -117,6 +127,7 @@ def clean_hebrew_title(text):
     text = re.sub(r"ע\d+", " ", text)
     text = re.sub(r"פ\d+", " ", text)
     # 5. Clean up quotes and extra spaces
+    text = re.sub(r"\b[a-zA-HJ-Z]\b", " ", text)
     text = text.replace('"', "").replace("'", "").strip()
     text = re.sub(r"\s+", " ", text)
     
@@ -175,19 +186,16 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                         full_desc = str(raw_fn)
                         
                     # ------------------ POSTER LOGIC -------------------------------
-                    
-                    if message.video:
+                    poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
+                    if poster_url == None:
                         has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                         if has_real_thumb:
                             poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                        else:
-                            poster_url = get_tmdb_poster(title,TMDB_API_KEY)
-                    elif message.document:
-                        poster_url = get_tmdb_poster(title,TMDB_API_KEY)
-                    if not poster_url:
-                        # Fallback to Hebrew Placeholder
-                        clean_t = quote(title)
-                        poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                            background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                        else:# Fallback to Hebrew Placeholder
+                            clean_t = quote(title)
+                            poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                            background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
 
                     messages.append(
                         {
@@ -199,6 +207,7 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                             "type": file.mime_type,
                             "chat_id": str(chat_id),
                             "img": poster_url,
+                            "background": background_url
                         }
                     )
 

@@ -1,9 +1,4 @@
-"""
-Surf-TG Stremio Addon - Complete Working Version
-"""
-
 from os import getenv
-
 from requests import Response
 from dotenv import load_dotenv
 from starlette.applications import Starlette
@@ -176,6 +171,7 @@ def video_to_meta(video_doc):
     caption = video_doc.get("description") or video_doc.get("caption") or ""
     # Get thumbnail/poster URL
     img = video_doc.get("img")
+    background = video_doc.get("background")
     poster_url = None
     if img:
         poster_url = img
@@ -184,6 +180,7 @@ def video_to_meta(video_doc):
         "type": "movie",
         "name": title,
         "poster": poster_url,  # Can be None if both options fail
+        "background": background,
         "description": f"{caption}\n\nSize: {video_doc.get('size', 'Unknown')}",
         "behaviorHints": {"defaultVideoId": stremio_id},
     }

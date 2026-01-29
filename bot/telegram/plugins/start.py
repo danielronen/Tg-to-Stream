@@ -126,7 +126,19 @@ async def file_receive_handler(bot: Client, message: Message):
             if not title:
                 title = f"Video {message.id}"
             # --------------------- NEW POSTER LOGIC -----------------------
-            if message.video:
+            poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
+            if poster_url == None:
+                has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                if has_real_thumb:
+                    poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                    background_url = f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                else:# Fallback to Hebrew Placeholder
+                    clean_t = quote(title)
+                    poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                    background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+
+            
+            """            if message.video:
                 has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                 if has_real_thumb:
                     poster_url = (
@@ -141,7 +153,7 @@ async def file_receive_handler(bot: Client, message: Message):
                 clean_t = quote(title)
                 poster_url = (
                     f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                )
+                )"""
 
             # --- Description ---
             full_desc = (
@@ -160,6 +172,7 @@ async def file_receive_handler(bot: Client, message: Message):
                 str(size),
                 str(mime_type),
                 img=poster_url,
+                background=background_url
             )
 
         except Exception as e:
