@@ -3,17 +3,14 @@
     <i>Python Web App which Indexes a Your Telegram Channel and Serves its Files for Download and Stream.</i>
 </div>
 
-
 <div align="center" >
 
-[![](https://img.shields.io/github/repo-size/weebzone/Surf-TG?color=green&label=Repo%20Size&labelColor=292c3b)](#) [![](https://img.shields.io/github/commit-activity/m/weebzone/Surf-TG?logo=github&labelColor=292c3b&label=Github%20Commits)](#) [![](https://img.shields.io/github/license/weebzone/Surf-TG?style=flat&label=License&labelColor=292c3b)](#)|[![](https://img.shields.io/github/issues-raw/weebzone/Surf-TG?style=flat&label=Open%20Issues&labelColor=292c3b)](#) [![](https://img.shields.io/github/issues-closed-raw/weebzone/Surf-TG?style=flat&label=Closed%20Issues&labelColor=292c3b)](#) [![](https://img.shields.io/github/issues-pr-raw/weebzone/Surf-TG?style=flat&label=Open%20Pull%20Requests&labelColor=292c3b)](#) [![](https://img.shields.io/github/issues-pr-closed-raw/weebzone/Surf-TG?style=flat&label=Closed%20Pull%20Requests&labelColor=292c3b)](#)
-:---:|:---:|
-[![](https://img.shields.io/github/languages/count/weebzone/Surf-TG?style=flat&label=Total%20Languages&labelColor=292c3b&color=blueviolet)](#) [![](https://img.shields.io/github/languages/top/weebzone/Surf-TG?style=flat&logo=python&labelColor=292c3b)](#) [![](https://img.shields.io/github/last-commit/weebzone/Surf-TG?style=flat&label=Last%20Commit&labelColor=292c3b&color=important)](#) [![](https://badgen.net/github/branches/weebzone/Surf-TG?label=Total%20Branches&labelColor=292c3b)](#)|[![](https://img.shields.io/github/forks/weebzone/Surf-TG?style=flat&logo=github&label=Forks&labelColor=292c3b&color=critical)](#) [![](https://img.shields.io/github/stars/weebzone/Surf-TG?style=flat&logo=github&label=Stars&labelColor=292c3b&color=yellow)](#) |
-
-</div>
 
 
+</div >
 
+
+#### * Make Sure You Read The Setup File For Stremio Addon Instructions [Here](https://github.com/danielronen/Tg-to-Stream/blob/master/setup.md)📑
 ## ***Features*** 📑
 
 - Multi Channel Index 📡
