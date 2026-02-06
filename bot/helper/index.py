@@ -80,13 +80,58 @@ async def fetch_message(chat_id, message_id):
 def clean_hebrew_title(text):
     if not text:
         return ""
+
+    # 0. High Priority Split (Isolate title from description/details)
+    # Added ':' for Hebrew captions that use 'Title: Description'
+    text = re.split(r"[|•,/\[\(:/]", text)[0].strip()
+
+    # 1. Clean Delimiters & Telegram emojis
+    text = re.sub(r"[._\-\[\]\(\)↙️👥]", " ", text)
+    
+    # 2. Preserve only Hebrew, English, and Numbers
+    text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
+
+    # 3. Technical Tags & File Extensions
+    tech_pattern = r"\b(4K|2160p|1080p|720p|480p|DVD|DVDRip|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|HEVC|ENG|HB|DL|Rw|heb|https?|www|com|net|org|mp4|mkv|avi|x264)\b"
+    text = re.sub(tech_pattern, "", text, flags=re.IGNORECASE)
+
+    # 4. Dates & Years
+    text = re.sub(r"\b\d{2,4}\s\d{2}\s\d{2}\b", "", text) # 26 01 2026
+    text = re.sub(r"\b(19|20)\d{2}\b", "", text)         # 2024
+
+    # 5. Group Names (Specific to your examples)
+    groups = [
+        r"זירה מדיה", r"ז\.מ", r"דב סרטים", r"שלמה סרטים", 
+        r"ע י", r"ת מ", r"הועלה", r"לולו סרטים", r"שבי גוזלן", 
+        r"למבורגיני", r"גוזלן", r"נתי מדיה", r"איכות ערוץ", 
+        r"צפייה ישירה", r"איכות", r"ערוץ", r"Yonidan", 
+        r"Premiumcontentil", r"ISrTeLeG",
+    ]
+    for group in groups:
+        text = re.sub(group, "", text, flags=re.IGNORECASE)
+
+    # 6. Season/Episode (Handles 'ע1', 'עונה 1', 'S01E01')
+    text = re.sub(r"\bע(ונה)?\s?\d*\b", " ", text)
+    text = re.sub(r"\bפ(רק)?\s?\d*\b", " ", text)
+    text = re.sub(r"s\d{1,2}e\d{1,2}", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b[עפ]\d+\b", " ", text)
+
+    # 7. Final Polish
+    text = re.sub(r"\b[a-zA-Z]\b", " ", text) # Remove single English letters
+    text = re.sub(r"\s+", " ", text).strip()
+    
+    return text
+
+def clean_hebrew_title2(text):
+    if not text:
+        return ""
     # 1. Remove all non-Hebrew/non-Alphanumeric symbols (dots, underscores, brackets)
     # This leaves Hebrew characters, English letters, and numbers
     text = re.sub(r"[._\-\[\]\(\)]", " ", text)
     text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
     # 2. Remove common English technical tags (Removed \b to be more aggressive)
     text = re.sub(
-        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|ENG|HB|HEVC|DL|Rw|heb|https?|CD1|CD2|www|com|net|org|ח\s?\d+)",
+        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|mp4|ENG|HB|HEVC|DL|Rw|heb|https?|CD1|CD2|www|com|net|org|ח\s?\d+)",
         "",
         text,
         flags=re.IGNORECASE,
@@ -114,6 +159,7 @@ def clean_hebrew_title(text):
         r"צפייה ישירה",
         r"איכות",
         r"ערוץ",
+        r"מתוקן",
         r"Yonidan",
         r"me ISrTeLeG"
     
@@ -133,7 +179,206 @@ def clean_hebrew_title(text):
     
     return text
 
+async def get_messages1(chat_id, first_message_id, last_message_id, batch_size=50):
+    messages = []
+    
+    # ✨ NEW: Get all existing msg_ids for this chat in ONE query (FAST!)
+    existing_msg_ids = set(
+        doc['msg_id'] 
+        for doc in db.files.find(
+            {"chat_id": str(chat_id)}, 
+            {"msg_id": 1, "_id": 0}  # Only fetch msg_id field
+        )
+    )
+    print(f"📊 Found {len(existing_msg_ids)} existing messages in database")
+    
+    current_message_id = first_message_id
+    skipped_count = 0
+    
+    while current_message_id <= last_message_id:
+        batch_message_ids = list(
+            range(
+                current_message_id,
+                min(current_message_id + batch_size, last_message_id + 1),
+            )
+        )
+        tasks = [fetch_message(chat_id, message_id) for message_id in batch_message_ids]
+        batch_messages = await gather(*tasks)
+        
+        for message in batch_messages:
+            if message:
+                # ✨ NEW: Skip if already in database
+                if message.id in existing_msg_ids:
+                    skipped_count += 1
+                    continue  # Skip all processing for duplicates
+                
+                title = None
+                if file := message.video or message.document:
+                    raw_fn = file.file_name or ""
+                    title, _ = splitext(raw_fn)
+                    is_default = any(
+                        x in title.lower()
+                        for x in ["default_name", "default name", "undefined", "index"]
+                    )
+                    if not is_default and title:
+                        # Priority A: Original File Name (if it's not generic)
+                        title = clean_hebrew_title(title)
+                        if len(title) > 33:
+                            title = title[:33]
+                            if " " in title:
+                                title = title.rsplit(" ", 1)[0]
+                        title = clean_hebrew_title(title)
+                    elif message.caption:
+                        # Priority B: Hebrew Caption (limited to 30 chars)
+                        clean_caption = message.caption.strip().split("\n")[0]
+                        clean_caption = clean_hebrew_title(clean_caption)
+                        if len(clean_caption) > 33:
+                            clean_caption = clean_caption[:33]
+                            if " " in clean_caption:
+                                title = clean_caption.rsplit(" ", 1)[0]
+                            else:
+                                title = clean_caption
+                        else: 
+                            title = clean_caption
+                    if not title:
+                        title = f"Video {message.id}"
+                    
+                    if message.caption:
+                        full_desc = str(message.caption)
+                    else:
+                        full_desc = str(raw_fn)
+                        
+                    # ------------------ POSTER LOGIC -------------------------------
+                    poster_url, background_url = get_tmdb_poster(title, TMDB_API_KEY)
+                    if poster_url == None:
+                        has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                        if has_real_thumb:
+                            poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                            background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                        else:
+                            clean_t = quote(title)
+                            poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                            background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+
+                    messages.append(
+                        {
+                            "msg_id": message.id,
+                            "title": title,
+                            "description": full_desc,
+                            "hash": file.file_unique_id[:6],
+                            "size": get_readable_file_size(file.file_size),
+                            "type": file.mime_type,
+                            "chat_id": str(chat_id),
+                            "img": poster_url,
+                            "background": background_url
+                        }
+                    )
+
+        current_message_id += batch_size
+    
+    # ✨ NEW: Print summary
+    print(f"✅ Processed {len(messages)} new files, skipped {skipped_count} duplicates")
+    
+    return messages
+
 async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50):
+    messages = []
+    
+    # Get all existing msg_ids for this chat in ONE query
+    existing_msg_ids = set(
+        doc['msg_id'] 
+        for doc in db.files.find(
+            {"chat_id": str(chat_id)}, 
+            {"msg_id": 1, "_id": 0}
+        )
+    )
+    print(f"📊 Found {len(existing_msg_ids)} existing messages in database")
+    
+    # Calculate which message IDs we need to fetch
+    all_msg_ids = set(range(first_message_id, last_message_id + 1))
+    missing_msg_ids = sorted(all_msg_ids - existing_msg_ids)
+    
+    print(f"🔍 Need to fetch {len(missing_msg_ids)} missing message IDs (skipping {len(existing_msg_ids)} duplicates)")
+    
+    non_video_count = 0
+    current_idx = 0
+    
+    # Process only missing messages in batches
+    while current_idx < len(missing_msg_ids):
+        batch_msg_ids = missing_msg_ids[current_idx:current_idx + batch_size]
+        
+        tasks = [fetch_message(chat_id, msg_id) for msg_id in batch_msg_ids]
+        batch_messages = await gather(*tasks)
+        
+        for message in batch_messages:
+            if message:
+                if file := message.video or message.document:
+                    if message.caption:
+                        # Priority A: Hebrew Caption
+                        clean_caption = message.caption.strip().split("\n")[0]
+                        clean_caption = clean_hebrew_title(clean_caption)
+                        if len(clean_caption) > 33:
+                            title = clean_caption[:33].rsplit(" ", 1)[0]
+                        else: 
+                            title = clean_caption
+                    else:
+                        
+                        raw_fn = file.file_name or ""
+                        title, _ = splitext(raw_fn)
+                        is_default = any(
+                            x in title.lower()
+                            for x in ["default_name", "default name", "undefined", "index"]
+                        )
+                        
+                        if not is_default and title:
+                            # Priority B: Original File Name (if it's not generic)
+                            title = clean_hebrew_title(title)
+                            if len(title) > 33:
+                                title = title[:33].rsplit(" ", 1)[0]
+                    if not title:
+                        title = f"Video {message.id}"
+                    if message.caption:
+                        full_desc = str(message.caption)
+                    else:
+                        full_desc = str(raw_fn)
+                    
+                    # POSTER LOGIC
+                    poster_url, background_url = get_tmdb_poster(title, TMDB_API_KEY)
+                    if poster_url == None:
+                        has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                        if has_real_thumb:
+                            poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                            background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
+                        else:
+                            clean_t = quote(title)
+                            poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+                            background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
+
+                    messages.append(
+                        {
+                            "msg_id": message.id,
+                            "title": title,
+                            "description": full_desc,
+                            "hash": file.file_unique_id,
+                            "size": get_readable_file_size(file.file_size),
+                            "type": file.mime_type,
+                            "chat_id": str(chat_id),
+                            "img": poster_url,
+                            "background": background_url
+                        }
+                    )
+                else:
+                    non_video_count += 1
+        
+        current_idx += batch_size
+    
+    print(f"✅ Processed {len(messages)} new video files")
+    print(f"⏭️  Skipped {len(existing_msg_ids)} already indexed")
+    print(f"📝 Skipped {non_video_count} non-video messages")
+    
+    return messages
+
+async def get_messages2(chat_id, first_message_id, last_message_id, batch_size=50):
     messages = []
     current_message_id = first_message_id
     while current_message_id <= last_message_id:
@@ -272,7 +517,7 @@ async def get_files(chat_id, page=1):
                 "chat_id": str(chat_id),
                 "title": title,
                 "description": full_desc,
-                "hash": file.file_unique_id[:6],
+                "hash": file.file_unique_id,
                 "size": get_readable_file_size(file.file_size),
                 "type": file.mime_type,
                 "img": poster_url,
@@ -309,7 +554,7 @@ async def posts_file(posts, chat_id):
             id=post["msg_id"],
             img=f"/api/thumb/{chat_id}?id={post['msg_id']}",
             title=post["title"],
-            hash=post["hash"],
+            hash=post["hash"][:6],
             size=post["size"],
             type=post["type"],
         )

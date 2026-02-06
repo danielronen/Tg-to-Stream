@@ -16,5 +16,5 @@ getLogger("aiohttp.web").setLevel(ERROR)
 LOGGER = getLogger(__name__)
 StartTime = time()
 
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 

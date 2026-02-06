@@ -69,7 +69,8 @@ async def start(bot: Client, message: Message):
             await wait_msg.delete()
             done_message = (
                 "✅ All your files have been successfully stored in the database. You're all set!\n\n"
-                "📁 You don't need to index again unless you make changes to the database."
+                "📁 You don't need to index again unless you make changes to the database.\n\n"
+                f"📁 Added: {len(files)} new files"
             )
 
             await bot.send_message(chat_id=message.chat.id, text=done_message)
@@ -94,21 +95,8 @@ async def file_receive_handler(bot: Client, message: Message):
             file = message.video or message.document
             msg_id = message.id
             # --- IMPROVED TITLE LOGIC ---
-            raw_fn = file.file_name or ""
-            title, _ = splitext(raw_fn)
-            is_default = any(
-                x in title.lower()
-                for x in ["default_name", "default name", "undefined"]
-            )
-            if not is_default and title:
-                # Priority A: Original File Name (if it's not generic)
-                title = clean_hebrew_title(title)
-                if len(title) > 33:
-                    title = title[:33]
-                    if " " in title:
-                        title = title.rsplit(" ", 1)[0]
-                # title = clean_hebrew_title(title)
-            elif message.caption:
+            
+            if message.caption:
                 # Priority B: Hebrew Caption (limited to 30 chars)
                 clean_caption = message.caption.strip().split("\n")[
                     0
@@ -123,8 +111,20 @@ async def file_receive_handler(bot: Client, message: Message):
                         # 2. Last resort fallback if both above failed
                 else:
                     title = clean_caption
-            if not title:
-                title = f"Video {message.id}"
+            else:
+                raw_fn = file.file_name or ""
+                title, _ = splitext(raw_fn)
+                is_default = any(
+                    x in title.lower()
+                    for x in ["default_name", "default name", "undefined"]
+                )
+                if not is_default and title:
+                    # Priority A: Original File Name (if it's not generic)
+                    title = clean_hebrew_title(title)
+                    if len(title) > 33:
+                        title = title[:33]
+                        if " " in title:
+                            title = title.rsplit(" ", 1)[0]
             # --------------------- NEW POSTER LOGIC -----------------------
             poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
             if poster_url == None:
@@ -136,30 +136,11 @@ async def file_receive_handler(bot: Client, message: Message):
                     clean_t = quote(title)
                     poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
                     background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-
-            
-            """            if message.video:
-                has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-                if has_real_thumb:
-                    poster_url = (
-                        f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
-                    )
-                else:
-                    poster_url = get_tmdb_poster(title, TMDB_API_KEY)
-            elif message.document:
-                poster_url = get_tmdb_poster(title, TMDB_API_KEY)
-            if not poster_url:
-                # Fallback to Hebrew Placeholder
-                clean_t = quote(title)
-                poster_url = (
-                    f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                )"""
-
             # --- Description ---
             full_desc = (
                 message.caption.strip() if message.caption else file.file_name.strip()
             )
-            hash = file.file_unique_id[:6]
+            hash = file.file_unique_id
             size = get_readable_file_size(file.file_size)
             mime_type = file.mime_type
 

@@ -147,7 +147,7 @@ def detect_channel(title, description=""):
     
     return None
 
-def extract_season_episode(description):
+def extract_season_episode2(description):
     """
     Extract season and episode numbers from Hebrew or English descriptions.
     Returns: (season_number, episode_number) or (None, None) if not found
@@ -200,6 +200,54 @@ def extract_season_episode(description):
     # Very short "E05"
     short_episode_only = r'\bE(\d+)\b'
     match = re.search(short_episode_only, description, re.IGNORECASE)
+    if match:
+        return 1, int(match.group(1))
+    
+    return None, None
+
+def extract_season_episode(description):
+    if not description:
+        return None, None    
+    
+    # 1. Hebrew format "עונה X פרק Y" (Improved to allow symbols like , - . |)
+    # We use [\s,.\-|]* to allow any combination of spaces and punctuation
+    hebrew_pattern = r'עונה\s*(\d+)[\s,.\-|]*פרק\s*(\d+)'
+    match = re.search(hebrew_pattern, description)
+    if match:
+        return int(match.group(1)), int(match.group(2))    
+    
+    # 2. Hebrew abbreviated "ע2 פ3" or "ע2, פ3"
+    hebrew_abbrev_pattern = r'ע(\d+)[\s,.\-|]*פ(\d+)'
+    match = re.search(hebrew_abbrev_pattern, description)
+    if match:
+        return int(match.group(1)), int(match.group(2))    
+    
+    # 3. English "Season X Episode Y"
+    english_pattern = r'[Ss]eason\s*(\d+)[\s,.\-|]*[Ee]pisode\s*(\d+)'
+    match = re.search(english_pattern, description)
+    if match:
+        return int(match.group(1)), int(match.group(2))    
+    
+    # 4. Short "S01E02"
+    short_pattern = r'[Ss](\d+)[Ee](\d+)'
+    match = re.search(short_pattern, description)
+    if match:
+        return int(match.group(1)), int(match.group(2))    
+    
+    # --- Fallbacks for Episode Only ---
+    
+    hebrew_episode_only = r'פרק\s*(\d+)'
+    match = re.search(hebrew_episode_only, description)
+    if match:
+        return 1, int(match.group(1))
+    
+    hebrew_very_short_episode = r'\bפ(\d+)\b' # Added \b to avoid matching middle of words
+    match = re.search(hebrew_very_short_episode, description)
+    if match:
+        return 1, int(match.group(1))
+    
+    english_episode_only = r'(?:Episode|Ep\.?|EP)\s*(\d+)'
+    match = re.search(english_episode_only, description, re.IGNORECASE)
     if match:
         return 1, int(match.group(1))
     
@@ -322,7 +370,7 @@ def generate_stream_url(video_doc):
     chat_id = video_doc.get("chat_id", AUTH_CHANNEL)
     hash_value = video_doc.get("hash", "")
     title = video_doc.get("title", "video")
-    
+    hash_short = hash_value[:6] if len(hash_value) > 6 else hash_value
     chat_id_clean = str(chat_id).replace("-100", "")
     filename = title.replace(" ", "_")
     filename = re.sub(r"[^\w\-_\.]", "_", filename)
@@ -337,7 +385,7 @@ def generate_stream_url(video_doc):
             filename += ".mkv"
     
     filename_encoded = quote(filename, safe="")
-    stream_url = f"{SURF_TG_BASE_URL}/{chat_id_clean}/{filename_encoded}?id={msg_id}&hash={hash_value}"
+    stream_url = f"{SURF_TG_BASE_URL}/{chat_id_clean}/{filename_encoded}?id={msg_id}&hash={hash_short}"
     
     return stream_url
 
@@ -755,7 +803,7 @@ if __name__ == "__main__":
     
     if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
         print(f"Starting addon with HTTPS on https://0.0.0.0:{port}")
-        print(f"Install URL: https://192.168.7.8:{port}/manifest.json\n")
+        print(f"Install URL: https://192.168.7.6:{port}/manifest.json\n")
         uvicorn.run(app, host="0.0.0.0", port=port, ssl_keyfile=ssl_key, ssl_certfile=ssl_cert)
     else:
         print(f"Starting addon with HTTP on http://0.0.0.0:{port}")
