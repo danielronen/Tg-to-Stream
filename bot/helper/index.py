@@ -70,6 +70,48 @@ def get_tmdb_poster(title, tmdb_api_key):
         print(f"❌ Error fetching TMDB poster for '{title}': {e}")
         return None, None
 
+def get_tmdb_details(title, tmdb_api_key):
+    if not tmdb_api_key:
+        print("No TMDB api key")
+        return None
+    if title in _TMDB_CACHE:
+        print("sent from cache")
+        return _TMDB_CACHE[title]
+    try:
+        search_url = "https://api.themoviedb.org/3/search/multi"
+        params = {
+            "api_key": tmdb_api_key,
+            "query": title,
+            "language": "he-IL",
+            "include_adult": "true"
+        }
+        response = httpx.get(search_url, params=params, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("results") and len(data["results"]) > 0:
+            for res in data["results"]:
+                if res.get("origin_country"):
+                    if res.get("origin_country")[0] == "IL":
+                        result = res
+                        _TMDB_CACHE[title] = result
+                        return result
+            result = data["results"][0]
+            _TMDB_CACHE[title] = result
+            return result
+        else:
+            _TMDB_CACHE[title] = None
+            return None
+            
+    except httpx.TimeoutException:
+        print(f"⏱️ TMDB request timeout for '{title}'")
+        return None
+    except httpx.HTTPError as e:
+        print(f"❌ TMDB HTTP error for '{title}': {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching TMDB poster for '{title}': {e}")
+        return None
+    
 async def fetch_message(chat_id, message_id):
     try:
         message = await StreamBot.get_messages(chat_id, message_id)
@@ -102,9 +144,9 @@ def clean_hebrew_title(text):
     # 5. Group Names (Specific to your examples)
     groups = [
         r"זירה מדיה", r"ז\.מ", r"דב סרטים", r"שלמה סרטים", 
-        r"ע י", r"ת מ", r"הועלה", r"לולו סרטים", r"שבי גוזלן", 
+        r"ע י", r"הועלה", r"לולו סרטים", r"שבי גוזלן", 
         r"למבורגיני", r"גוזלן", r"נתי מדיה", r"איכות ערוץ", 
-        r"צפייה ישירה", r"איכות", r"ערוץ", r"Yonidan", 
+        r"צפייה ישירה", r"איכות", r"ערוץ", r"Yonidan",r"מתורגם", 
         r"Premiumcontentil", r"ISrTeLeG",
     ]
     for group in groups:
@@ -121,165 +163,6 @@ def clean_hebrew_title(text):
     text = re.sub(r"\s+", " ", text).strip()
     
     return text
-
-def clean_hebrew_title2(text):
-    if not text:
-        return ""
-    # 1. Remove all non-Hebrew/non-Alphanumeric symbols (dots, underscores, brackets)
-    # This leaves Hebrew characters, English letters, and numbers
-    text = re.sub(r"[._\-\[\]\(\)]", " ", text)
-    text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
-    # 2. Remove common English technical tags (Removed \b to be more aggressive)
-    text = re.sub(
-        r"(4K|2160p|1080p|720p|480p|430p|BluRay|BRRip|WEB-?DL|HDTV|WEB|h\s?264|x265|x26?4|h26?4|mp4|ENG|HB|HEVC|DL|Rw|heb|https?|CD1|CD2|www|com|net|org|ח\s?\d+)",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-    # 3. Remove Dates (Handles 23 01 26 or 2023 01 26)
-    # This looks for sequences of 2-4 digits separated by spaces
-    text = re.sub(r"\b\d{2,4}\s\d{2}\s\d{2}\b", "", text)
-    text = re.sub(r"\b(19|20)\d{2}\b", "", text)
-    # 3. Remove Hebrew Uploader/Group tags
-    # Added common variations like brackets
-    groups = [
-        r"זירה מדיה",
-        r"ז\.מ",
-        r"דב סרטים",
-        r"שלמה סרטים",
-        r"ע י",
-        r"ת מ",
-        r"הועלה",
-        r"לולו סרטים",
-        r"שבי גוזלן",
-        r"למבורגיני",
-        r"גוזלן",
-        r"נתי מדיה",
-        r"איכות ערוץ",
-        r"צפייה ישירה",
-        r"איכות",
-        r"ערוץ",
-        r"מתוקן",
-        r"Yonidan",
-        r"me ISrTeLeG"
-    
-    ]
-    for group in groups:
-        text = re.sub(group, "", text)
-    # 4. Remove Season/Episode info
-    text = re.sub(r"\bע(ונה)?\s?\d*\b", "", text)
-    text = re.sub(r"\bפ(רק)?\s?\d*\b", "", text)
-    text = re.sub(r"s\d{1,2}e\d{1,2}", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"ע\d+", " ", text)
-    text = re.sub(r"פ\d+", " ", text)
-    # 5. Clean up quotes and extra spaces
-    text = re.sub(r"\b[a-zA-HJ-Z]\b", " ", text)
-    text = text.replace('"', "").replace("'", "").strip()
-    text = re.sub(r"\s+", " ", text)
-    
-    return text
-
-async def get_messages1(chat_id, first_message_id, last_message_id, batch_size=50):
-    messages = []
-    
-    # ✨ NEW: Get all existing msg_ids for this chat in ONE query (FAST!)
-    existing_msg_ids = set(
-        doc['msg_id'] 
-        for doc in db.files.find(
-            {"chat_id": str(chat_id)}, 
-            {"msg_id": 1, "_id": 0}  # Only fetch msg_id field
-        )
-    )
-    print(f"📊 Found {len(existing_msg_ids)} existing messages in database")
-    
-    current_message_id = first_message_id
-    skipped_count = 0
-    
-    while current_message_id <= last_message_id:
-        batch_message_ids = list(
-            range(
-                current_message_id,
-                min(current_message_id + batch_size, last_message_id + 1),
-            )
-        )
-        tasks = [fetch_message(chat_id, message_id) for message_id in batch_message_ids]
-        batch_messages = await gather(*tasks)
-        
-        for message in batch_messages:
-            if message:
-                # ✨ NEW: Skip if already in database
-                if message.id in existing_msg_ids:
-                    skipped_count += 1
-                    continue  # Skip all processing for duplicates
-                
-                title = None
-                if file := message.video or message.document:
-                    raw_fn = file.file_name or ""
-                    title, _ = splitext(raw_fn)
-                    is_default = any(
-                        x in title.lower()
-                        for x in ["default_name", "default name", "undefined", "index"]
-                    )
-                    if not is_default and title:
-                        # Priority A: Original File Name (if it's not generic)
-                        title = clean_hebrew_title(title)
-                        if len(title) > 33:
-                            title = title[:33]
-                            if " " in title:
-                                title = title.rsplit(" ", 1)[0]
-                        title = clean_hebrew_title(title)
-                    elif message.caption:
-                        # Priority B: Hebrew Caption (limited to 30 chars)
-                        clean_caption = message.caption.strip().split("\n")[0]
-                        clean_caption = clean_hebrew_title(clean_caption)
-                        if len(clean_caption) > 33:
-                            clean_caption = clean_caption[:33]
-                            if " " in clean_caption:
-                                title = clean_caption.rsplit(" ", 1)[0]
-                            else:
-                                title = clean_caption
-                        else: 
-                            title = clean_caption
-                    if not title:
-                        title = f"Video {message.id}"
-                    
-                    if message.caption:
-                        full_desc = str(message.caption)
-                    else:
-                        full_desc = str(raw_fn)
-                        
-                    # ------------------ POSTER LOGIC -------------------------------
-                    poster_url, background_url = get_tmdb_poster(title, TMDB_API_KEY)
-                    if poster_url == None:
-                        has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-                        if has_real_thumb:
-                            poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                            background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                        else:
-                            clean_t = quote(title)
-                            poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                            background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-
-                    messages.append(
-                        {
-                            "msg_id": message.id,
-                            "title": title,
-                            "description": full_desc,
-                            "hash": file.file_unique_id[:6],
-                            "size": get_readable_file_size(file.file_size),
-                            "type": file.mime_type,
-                            "chat_id": str(chat_id),
-                            "img": poster_url,
-                            "background": background_url
-                        }
-                    )
-
-        current_message_id += batch_size
-    
-    # ✨ NEW: Print summary
-    print(f"✅ Processed {len(messages)} new files, skipped {skipped_count} duplicates")
-    
-    return messages
 
 async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50):
     messages = []
@@ -337,13 +220,25 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                                 title = title[:33].rsplit(" ", 1)[0]
                     if not title:
                         title = f"Video {message.id}"
+                        
+                        
                     if message.caption:
                         full_desc = str(message.caption)
                     else:
                         full_desc = str(raw_fn)
                     
                     # POSTER LOGIC
-                    poster_url, background_url = get_tmdb_poster(title, TMDB_API_KEY)
+                    tmdb_id = None
+                    tmdb_res = get_tmdb_details(title, TMDB_API_KEY)
+                    if tmdb_res:
+                        poster_path = tmdb_res.get("poster_path")
+                        background_path = tmdb_res.get("backdrop_path")
+                        tmdb_id = tmdb_res.get("id")
+                        full_desc = tmdb_res.get("overview")
+                        poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                        background_url = f"https://image.tmdb.org/t/p/w1280{background_path}"
+                                                
+                    #poster_url, background_url = get_tmdb_poster(title, TMDB_API_KEY)
                     if poster_url == None:
                         has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                         if has_real_thumb:
@@ -376,87 +271,6 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
     print(f"⏭️  Skipped {len(existing_msg_ids)} already indexed")
     print(f"📝 Skipped {non_video_count} non-video messages")
     
-    return messages
-
-async def get_messages2(chat_id, first_message_id, last_message_id, batch_size=50):
-    messages = []
-    current_message_id = first_message_id
-    while current_message_id <= last_message_id:
-        batch_message_ids = list(
-            range(
-                current_message_id,
-                min(current_message_id + batch_size, last_message_id + 1),
-            )
-        )
-        tasks = [fetch_message(chat_id, message_id) for message_id in batch_message_ids]
-        batch_messages = await gather(*tasks)
-        for message in batch_messages:
-            if message:
-                title = None
-                if file := message.video or message.document:
-                    raw_fn = file.file_name or ""
-                    title, _ = splitext(raw_fn)
-                    is_default = any(
-                        x in title.lower()
-                        for x in ["default_name", "default name", "undefined", "index"]
-                    )
-                    if not is_default and title:
-                        # Priority A: Original File Name (if it's not generic)
-                        title = clean_hebrew_title(title)
-                        if len(title) > 33:
-                            title = title[:33]
-                            if " " in title:
-                                title = title.rsplit(" ", 1)[0]
-                        title = clean_hebrew_title(title)
-                    elif message.caption:
-                        # Priority B: Hebrew Caption (limited to 30 chars)
-                        clean_caption = message.caption.strip().split("\n")[
-                            0
-                        ]  # Take first line only
-                        clean_caption = clean_hebrew_title(clean_caption)
-                        if len(clean_caption) > 33:
-                            clean_caption = clean_caption[:33]
-                            if " " in clean_caption:
-                                title = clean_caption.rsplit(" ", 1)[0]
-                                # 2. Last resort fallback if both above failed
-                            else:
-                                title = clean_caption
-                        else: 
-                            title = clean_caption
-                    if not title:
-                        title = f"Video {message.id}"
-                    if message.caption:
-                        full_desc = str(message.caption)
-                    else:
-                        full_desc = str(raw_fn)
-                        
-                    # ------------------ POSTER LOGIC -------------------------------
-                    poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
-                    if poster_url == None:
-                        has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-                        if has_real_thumb:
-                            poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                            background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                        else:# Fallback to Hebrew Placeholder
-                            clean_t = quote(title)
-                            poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                            background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-
-                    messages.append(
-                        {
-                            "msg_id": message.id,
-                            "title": title,
-                            "description": full_desc,
-                            "hash": file.file_unique_id[:6],
-                            "size": get_readable_file_size(file.file_size),
-                            "type": file.mime_type,
-                            "chat_id": str(chat_id),
-                            "img": poster_url,
-                            "background": background_url
-                        }
-                    )
-
-        current_message_id += batch_size
     return messages
 
 async def get_files(chat_id, page=1):

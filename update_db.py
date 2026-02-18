@@ -1,12 +1,15 @@
+from dotenv import load_dotenv
 from pymongo import MongoClient, UpdateOne
+import os
 
 # --- CONFIGURATION ---
-MONGO_URI = ''
+load_dotenv("config.env")
+MONGO_URI = os.getenv("DATABASE_URL")
 DB_NAME = 'surftg'
 COLLECTION_NAME = 'files'
 
 # set to True to PREVIEW changes, False to APPLY changes
-DRY_RUN = False 
+DRY_RUN = True 
 
 # The fields to check
 FIELDS_TO_CHECK = ['img', 'background']
@@ -14,8 +17,9 @@ FIELDS_TO_CHECK = ['img', 'background']
 # Exact strings to swap
 # Note: I removed the trailing '/' from the new domain to prevent double slashes 
 # (e.g. .com//api) since your existing data likely already has a slash after .com
-OLD_DOMAIN = "https://comm-coaching-thesis-forgot.trycloudflare.com"
-NEW_DOMAIN = "https://mental-spelling-guardian-tokyo.trycloudflare.com"
+OLD_DOMAIN = "https://command-britannica-jones-far.trycloudflare.com"
+NEW_DOMAIN = "https://advisor-feedback-quiz-irc.trycloudflare.com"
+
 
 def update_urls():
     client = MongoClient(MONGO_URI)
@@ -31,7 +35,17 @@ def update_urls():
 
     cursor = collection.find(query)
     bulk_operations = []
-    
+    wating = True
+    while wating: 
+        user_input = input("1) DRY RUN\n2) LIVE UPDATE\n",)
+        if user_input == "1":
+            DRY_RUN = True
+            wating = False
+        if user_input == "2":
+            DRY_RUN = False
+            wating = False
+        
+        
     print(f"--- STARTED ({'DRY RUN' if DRY_RUN else 'LIVE UPDATE'}) ---")
 
     for doc in cursor:

@@ -4,7 +4,7 @@ from bot import LOGGER
 from bot.config import Telegram
 from bot.helper.database import Database
 from bot.helper.file_size import get_readable_file_size
-from bot.helper.index import get_messages, clean_hebrew_title, get_tmdb_poster
+from bot.helper.index import get_messages, clean_hebrew_title, get_tmdb_details, get_tmdb_poster
 from bot.helper.media import is_media
 from bot.telegram import StreamBot, UserBot
 from pyrogram import filters, Client
@@ -15,6 +15,13 @@ from pyrogram.enums.parse_mode import ParseMode
 from asyncio import sleep
 from urllib.parse import quote
 from dotenv import load_dotenv
+import httpx
+
+
+tmdb_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(10.0, connect=5.0),
+    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+)
 
 load_dotenv("config.env")
 SURF_TG_BASE_URL = os.getenv("BASE_URL", "")
@@ -98,9 +105,7 @@ async def file_receive_handler(bot: Client, message: Message):
             
             if message.caption:
                 # Priority B: Hebrew Caption (limited to 30 chars)
-                clean_caption = message.caption.strip().split("\n")[
-                    0
-                ]  # Take first line only
+                clean_caption = message.caption.strip().split("\n")[0]  # Take first line only
                 clean_caption = clean_hebrew_title(clean_caption)
                 if len(clean_caption) > 33:
                     clean_caption = clean_caption[:33]
@@ -125,8 +130,26 @@ async def file_receive_handler(bot: Client, message: Message):
                         title = title[:33]
                         if " " in title:
                             title = title.rsplit(" ", 1)[0]
+                            
+                            
+            # --- Description ---
+            full_desc = (
+                message.caption.strip() if message.caption else file.file_name.strip()
+            )
             # --------------------- NEW POSTER LOGIC -----------------------
-            poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
+            
+                                # POSTER LOGIC
+            tmdb_res = get_tmdb_details(title, TMDB_API_KEY)
+            poster_url = None
+            if tmdb_res:
+                poster_path = tmdb_res.get("poster_path")
+                background_path = tmdb_res.get("backdrop_path")
+                full_desc = tmdb_res.get("overview")
+                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+                background_url = f"https://image.tmdb.org/t/p/w1280{background_path}"
+                    
+    
+            #poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
             if poster_url == None:
                 has_real_thumb = hasattr(file, "thumbs") and file.thumbs
                 if has_real_thumb:
@@ -136,10 +159,7 @@ async def file_receive_handler(bot: Client, message: Message):
                     clean_t = quote(title)
                     poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
                     background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-            # --- Description ---
-            full_desc = (
-                message.caption.strip() if message.caption else file.file_name.strip()
-            )
+
             hash = file.file_unique_id
             size = get_readable_file_size(file.file_size)
             mime_type = file.mime_type
