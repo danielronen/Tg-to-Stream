@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from urllib.parse import quote, unquote
 from collections import defaultdict
+from datetime import datetime
 import os
 import re
 import hashlib
@@ -32,8 +33,6 @@ TV_CHANNELS = {
     "עכשיו 14": ["עכשיו 14", "עכשיו14", "channel 14"],
     "i24News": ["I24NEWS", "i24News", "i24news"],
     "Sport 5": ["Sport 5", "Sport5", "ספורט5", "ספורט 5"],
-    "Yes": ["Yes", "Yes+", "יס"],
-    "Hot": ["Hot", "HOT", "הוט"],
     # Add more channels here as needed
 }
 
@@ -147,64 +146,6 @@ def detect_channel(title, description=""):
     
     return None
 
-def extract_season_episode2(description):
-    """
-    Extract season and episode numbers from Hebrew or English descriptions.
-    Returns: (season_number, episode_number) or (None, None) if not found
-    """
-    if not description:
-        return None, None    
-    
-    # Hebrew format "עונה X פרק Y"
-    hebrew_pattern = r'עונה\s*(\d+)\s*[|\s]*פרק\s*(\d+)'
-    match = re.search(hebrew_pattern, description)
-    if match:
-        return int(match.group(1)), int(match.group(2))    
-    
-    # Hebrew abbreviated "ע2 פ3"
-    hebrew_abbrev_pattern = r'ע(\d+)\s*פ(\d+)'
-    match = re.search(hebrew_abbrev_pattern, description)
-    if match:
-        return int(match.group(1)), int(match.group(2))    
-    
-    # English "Season X Episode Y"
-    english_pattern = r'[Ss]eason\s*(\d+)\s*[Ee]pisode\s*(\d+)'
-    match = re.search(english_pattern, description)
-    if match:
-        return int(match.group(1)), int(match.group(2))    
-    
-    # Short "S01E02"
-    short_pattern = r'[Ss](\d+)[Ee](\d+)'
-    match = re.search(short_pattern, description)
-    if match:
-        return int(match.group(1)), int(match.group(2))    
-    
-    # Hebrew episode only "פרק 5" (assumes Season 1)
-    hebrew_episode_only = r'פרק\s*(\d+)'
-    match = re.search(hebrew_episode_only, description)
-    if match:
-        return 1, int(match.group(1))
-    
-    # Very short Hebrew "פ5"
-    hebrew_very_short_episode = r'פ(\d+)'
-    match = re.search(hebrew_very_short_episode, description)
-    if match:
-        return 1, int(match.group(1))
-    
-    # English episode only "Episode 5"
-    english_episode_only = r'(?:Episode|Ep\.?|EP)\s*(\d+)'
-    match = re.search(english_episode_only, description, re.IGNORECASE)
-    if match:
-        return 1, int(match.group(1))
-    
-    # Very short "E05"
-    short_episode_only = r'\bE(\d+)\b'
-    match = re.search(short_episode_only, description, re.IGNORECASE)
-    if match:
-        return 1, int(match.group(1))
-    
-    return None, None
-
 def extract_season_episode(description):
     if not description:
         return None, None    
@@ -278,10 +219,11 @@ def classify_video(video_doc):
     Returns: (category, series_name_or_none, season_or_none, episode_or_none)
     """
     description = video_doc.get("description", "") or ""
+    ep_overview = video_doc.get("ep_ow", "") or ""
     title = video_doc.get("title", "")
     
     # Check for season/episode
-    season, episode = extract_season_episode(description)
+    season, episode = extract_season_episode(ep_overview)
     
     if season and episode:
         # Has S/E → It's a series
@@ -289,7 +231,7 @@ def classify_video(video_doc):
         return 'series', series_name, season, episode
     
     # No S/E info - check if it has channel association
-    channel = detect_channel(title, description)
+    channel = detect_channel(title, ep_overview)
     
     if channel:
         # Has channel but no S/E → TV catchup content
@@ -340,29 +282,39 @@ def get_series_meta(series_name, episodes_list):
     
     poster_url = latest.get('img') if latest else None
     background_url = latest.get('background') if latest else None
+    overview = latest.get('description')
     
     # Detect channel for series description
-    channel = None
-    if latest:
-        channel = detect_channel(latest.get('title', ''), latest.get('description', ''))
+    #channel = None
+    #if latest:
+    #    channel = detect_channel(latest.get('title', ''), latest.get('description', ''))
     
     # Build description
-    description_parts = [f"📺 {len(seasons)} Season(s) • {total_episodes} Episodes"]
-    if channel:
-        description_parts.insert(0, f"📡 {channel}")
-    description = "\n".join(description_parts)
+    description_parts = f"📺 {len(seasons)} Season(s) • {total_episodes} Episodes"
+    #if channel:
+    #    description_parts.insert(0, f"📡 {channel}")
+    #description = "\n".join(description_parts)
+    description = overview
     
     series_hash = abs(hash(series_name))
     series_id = f"surftg_series_{series_hash:x}"
     
-    return {
+    meta = {
         "id": series_id,
         "type": "series",
         "name": series_name,
         "poster": poster_url,
         "description": description,
-        "background": background_url
+        "background": background_url,
+        "releaseInfo": description_parts
     }
+    
+    released = latest.get("released")
+    if released:
+        meta["releaseInfo"] = f"{released[:4]}{description_parts}"
+    
+    
+    return meta
 
 def generate_stream_url(video_doc):
     """Generate Surf-TG streaming URL for Stremio"""
@@ -400,22 +352,26 @@ def video_to_movie_meta(video_doc):
     background_url = video_doc.get("background")
     
     # Add channel info to description
-    channel = detect_channel(title, description)
-    desc_parts = []
-    if channel:
-        desc_parts.append(f"📡 {channel}")
-    if description:
-        desc_parts.append(description)
-    desc_parts.append(f"💾 Size: {size}")
+    #channel = detect_channel(title, description)
+    #desc_parts = []
+    #if channel:
+    #    desc_parts.append(f"📡 {channel}")
+    #if description:
+    #    desc_parts.append(description)
+    #desc_parts.append(f"💾 Size: {size}")
     
-    return {
+    meta = {
         "id": stremio_id,
         "type": "movie",
         "name": title,
         "poster": poster_url,
-        "description": "\n".join(desc_parts),
+        "description": description,
         "background": background_url
     }
+    released = video_doc.get("released")
+    if released:
+        meta["releaseInfo"] = released[:4]
+    return meta
 
 # ========== STREMIO ROUTES ==========
 
@@ -598,14 +554,36 @@ async def meta(request):
                         "season": ep_data['season'],
                         "episode": ep_data['episode'],
                     }
+                    ep_name = video.get("ep_name")
+                    ep_desc = video.get("ep_ow")
+                    ep_thumb = video.get("thumbnail")
+                    desc = video.get('description')
                     
-                    desc = video.get('description', '').strip()
-                    if desc:
+                    release_date = video.get("released")
+                    if release_date:
+                        try:
+                            dt_obj = datetime.strptime(release_date.strip(), "%Y-%m-%d")
+                            strict_iso = dt_obj.strftime("%Y-%m-%dT00:00:00.000Z")
+                            episode_obj["released"] = strict_iso
+                        except ValueError:
+                            print(f"⚠️ Skipping invalid release date format: {release_date}")
+                    
+                    if ep_name:
+                        episode_obj["title"] = ep_name
+                           
+                    if ep_desc:
+                        episode_obj["overview"] = ep_desc
+                        
+                    elif desc:
                         episode_obj["overview"] = desc
                     
-                    thumb = video.get('background', '').strip()
-                    if thumb and not thumb.startswith('https://placehold.jp'):
-                        episode_obj["thumbnail"] = thumb
+                    bg = video.get('background', '').strip()
+                    
+                    if ep_thumb and not ep_thumb.startswith('https://placehold.jp'):
+                        episode_obj["thumbnail"] = ep_thumb
+                        
+                    elif bg and not bg.startswith('https://placehold.jp'):
+                        episode_obj["thumbnail"] = bg
                     
                     videos.append(episode_obj)
             
@@ -683,10 +661,11 @@ async def stream(request):
         title = video_doc.get("title", "Unknown")
         size = video_doc.get("size", "")
         description = video_doc.get("description", "")
+        ep_overview = video_doc.get("ep_ow", "")
         
         # Add channel info to stream title
         channel = detect_channel(title, description)
-        season, episode = extract_season_episode(description)
+        season, episode = extract_season_episode(ep_overview)
         
         title_parts = []
         if channel:

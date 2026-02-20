@@ -1,10 +1,11 @@
+from datetime import datetime
 import re
 import os
 from bot import LOGGER
 from bot.config import Telegram
 from bot.helper.database import Database
 from bot.helper.file_size import get_readable_file_size
-from bot.helper.index import get_messages, clean_hebrew_title, get_tmdb_details, get_tmdb_poster
+from bot.helper.index import get_messages, clean_hebrew_title, get_tmdb_details, extract_season_episode, get_tmdb_ep_det
 from bot.helper.media import is_media
 from bot.telegram import StreamBot, UserBot
 from pyrogram import filters, Client
@@ -30,7 +31,6 @@ SOURCE_CHANNELS_STR = os.getenv("GROUPS_AND_CHANNELS", "")
 SOURCE_CHANNELS = [
     int(ch.strip()) for ch in SOURCE_CHANNELS_STR.split(",") if ch.strip()
 ]
-
 
 db = Database()
 
@@ -93,6 +93,7 @@ async def start(bot: Client, message: Message):
         await message.reply(text="Channel is not in AUTH_CHANNEL")
 
 
+
 @StreamBot.on_message(filters.channel & (filters.document | filters.video))
 async def file_receive_handler(bot: Client, message: Message):
     channel_id = message.chat.id
@@ -138,17 +139,51 @@ async def file_receive_handler(bot: Client, message: Message):
             )
             # --------------------- NEW POSTER LOGIC -----------------------
             
-                                # POSTER LOGIC
-            tmdb_res = get_tmdb_details(title, TMDB_API_KEY)
+            tmdb_res = await get_tmdb_details(title, full_desc,TMDB_API_KEY,tmdb_client)
+            raw_desc = full_desc
+            se,ep = extract_season_episode(full_desc)
+            
             poster_url = None
+            ep_name = None
+            thumb_url = None
+            ep_overview = None
+            background_url = None
+            released = None
+            
             if tmdb_res:
-                poster_path = tmdb_res.get("poster_path")
-                background_path = tmdb_res.get("backdrop_path")
-                full_desc = tmdb_res.get("overview")
-                poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
-                background_url = f"https://image.tmdb.org/t/p/w1280{background_path}"
+                tmdb_id = tmdb_res.get("id")
+                media_type = tmdb_res.get("media_type")
+                p_path = tmdb_res.get("poster_path")
+                b_path = tmdb_res.get("backdrop_path")
+                overview = tmdb_res.get("overview")
+                if p_path and b_path:
+                    poster_url = f"https://image.tmdb.org/t/p/w500{p_path}"
+                    background_url = f"https://image.tmdb.org/t/p/w1280{b_path}"
+                elif p_path:
+                    poster_url = f"https://image.tmdb.org/t/p/w500{p_path}"
+                    background_url = f"https://image.tmdb.org/t/p/w1280{p_path}"
+                if overview:
+                    full_desc = overview
+                if tmdb_res.get("release_date"):
+                    released = tmdb_res.get("release_date")
+                if tmdb_res.get("first_air_date"):
+                    released = tmdb_res.get("first_air_date")
                     
-    
+                if ep or se and media_type == "tv":
+                    ep_name, ep_ow, ep_thumb, air_date = await get_tmdb_ep_det(tmdb_id,se,ep,TMDB_API_KEY,tmdb_client)
+                    if ep_name:
+                        episode_name = ep_name
+                    if ep_ow:
+                        ep_overview = ep_ow + f"\nS{se:02d}E{ep:02d}"
+                    if ep_thumb:
+                        thumb_url = ep_thumb                     
+                    if air_date:
+                        released = air_date
+                else:
+                    ep_overview = raw_desc
+                    episode_name = title
+                    thumb_url = background_url                            
+                     
             #poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
             if poster_url == None:
                 has_real_thumb = hasattr(file, "thumbs") and file.thumbs
@@ -160,6 +195,17 @@ async def file_receive_handler(bot: Client, message: Message):
                     poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
                     background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
 
+            if not thumb_url:
+                has_real_thumb = hasattr(file, "thumbs") and file.thumbs
+                if has_real_thumb:
+                    thumb_url = f"{SURF_TG_BASE_URL}/api/thumb/{channel_id}?id={msg_id}"
+                    
+            if not ep_overview or not episode_name:
+                ep_overview = raw_desc
+                episode_name = title
+                
+            if not released:
+                released = datetime.now().strftime("%Y-%m-%d")
             hash = file.file_unique_id
             size = get_readable_file_size(file.file_size)
             mime_type = file.mime_type
@@ -173,7 +219,12 @@ async def file_receive_handler(bot: Client, message: Message):
                 str(size),
                 str(mime_type),
                 img=poster_url,
-                background=background_url
+                background=background_url,
+                ep_overview=ep_overview,
+                ep_name=episode_name,
+                thumb_url=thumb_url,
+                released=released
+                
             )
 
         except Exception as e:

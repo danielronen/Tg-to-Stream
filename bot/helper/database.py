@@ -103,11 +103,11 @@ class Database:
             'msg_id', DESCENDING).skip(offset).limit(per_page)
         return list(mydoc)
 
-    async def add_tgfiles(self, chat_id, file_id, hash, name, description, size, file_type, img, background):
+    async def add_tgfiles(self, chat_id, file_id, hash, name, description, size, file_type, img, background, ep_overview, ep_name, thumb_url, released):
         if fetch_old := self.files.find_one({"chat_id": chat_id, "hash": hash}):
             return
         file = {"chat_id": chat_id, "msg_id": file_id,
-                "hash": hash, "title": name, "description":description, "size": size, "type": file_type, "img": img, "background": background}
+                "hash": hash, "title": name, "description":description, "size": size, "type": file_type, "img": img, "background": background, "ep_ow": ep_overview, "ep_name": ep_name, "thumbnail": thumb_url, "released":released}
         self.files.insert_one(file)
 
 
