@@ -9,3 +9,8 @@ config.env
 /.vscode/
 /bot/downloads/
 /cache/
+test_tmdb.py
+update_db.py
+stremio.py
+channels.py
+tmdb_response.py

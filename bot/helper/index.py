@@ -216,7 +216,7 @@ def clean_hebrew_title(text):
     text = re.sub(r"[._\-\[\]\(\)↙️👥]", " ", text)
     
     # 2. Preserve only Hebrew, English, and Numbers
-    text = re.sub(r"[^א-תa-zA-Z0-9\s]", " ", text)
+    text = re.sub(r"[^א-תa-zA-Z0-9\s'\"\u05F3\u05F4]", " ", text)
 
     # 3. Technical Tags & File Extensions
     tech_pattern = r"\b(4K|2160p|1080|1080p|720p|480p|DVD|DVDRip|BluRay|BRRip|WEB-?DL|WeDdl|HDTV|WEB|h\s?264|x265|x26?4|HEVC|ENG|HB|DL|Rw|heb|https?|www|com|net|org|mp4|mkv|avi|x264)\b"

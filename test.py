@@ -451,7 +451,7 @@ async def catalog(request):
                 # Only include videos classified as 'tv_channel'
                 if vid_type == 'tv_channel':
                     title = video.get("title", "")
-                    description = video.get("description", "")
+                    description = video.get("ep_ow", "")
                     video_channel = detect_channel(title, description)
                     
                     if video_channel == genre_filter:
@@ -686,6 +686,9 @@ async def stream(request):
                         "url": stream_url,
                         "title": stream_title,
                         "name": title,
+                        "behaviorHints": {
+                            "bingeGroup": "surftg-auto-play"
+                        }
                     }
                 ]
             },
