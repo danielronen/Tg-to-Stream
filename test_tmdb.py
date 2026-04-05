@@ -112,10 +112,11 @@ async def get_tmdb_ep_det2(tmdb_id, season, ep, tmdb_api_key, client):
 
 
 async def main():
-    result1, result2, result3, result4 = await get_tmdb_ep_det2(231289,1,7,TMDB_API_KEY,tmdb_client)
-    print(f"result1: {result1}" )
-    print(f"result2: {result2}")
-    print(f"result3: {result3}")
+    #result1, result2, result3, result4 = await get_tmdb_ep_det2(231289,1,7,TMDB_API_KEY,tmdb_client)
+    #print(f"result1: {result1}" )
+    #print(f"result2: {result2}")
+    #print(f"result3: {result3}")
+    result4 = get_tmdb_details("הבורר", TMDB_API_KEY)
     print(f"result4: {result4}")
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from bot.config import Telegram
 from bot.server import web_server
 from bot.telegram import StreamBot, UserBot
 from bot.telegram.clients import initialize_clients
+from bot.telegram.plugins.start import reload_blacklist
 
 loop = get_event_loop()
 
@@ -27,6 +28,14 @@ async def start_services():
     await asleep(1.2)
     LOGGER.info("Initializing Multi Clients")
     await initialize_clients()
+    
+    # --- NEW: LOAD BLACKLIST HERE ---
+    LOGGER.info("Loading Blacklist Cache...")
+    try:
+        await reload_blacklist()
+    except Exception as e:
+        LOGGER.error(f"Failed to load blacklist: {e}")
+    
     
     await asleep(2)
     LOGGER.info('Initalizing Surf Web Server..')

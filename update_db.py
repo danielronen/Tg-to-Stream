@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from pymongo import MongoClient, UpdateOne
 import os
+import re
 
 # --- CONFIGURATION ---
 load_dotenv("config.env")
@@ -12,13 +13,17 @@ COLLECTION_NAME = 'files'
 DRY_RUN = True 
 
 # The fields to check
-FIELDS_TO_CHECK = ['img', 'background']
+#FIELDS_TO_CHECK = ['img', 'background', 'thumbnail']
+FIELDS_TO_CHECK = ['description', 'ep_ow']
 
 # Exact strings to swap
 # Note: I removed the trailing '/' from the new domain to prevent double slashes 
 # (e.g. .com//api) since your existing data likely already has a slash after .com
-OLD_DOMAIN = "https://command-britannica-jones-far.trycloudflare.com"
-NEW_DOMAIN = "https://advisor-feedback-quiz-irc.trycloudflare.com"
+#OLD_DOMAIN = "https://abc-agricultural-thrown-further.trycloudflare.com"
+#NEW_DOMAIN = "https://airport-input-instructors-storm.trycloudflare.com"
+OLD_DOMAIN = "https://t.me/Premiumcontentil"
+NEW_DOMAIN = ""
+
 
 
 def update_urls():
@@ -27,9 +32,16 @@ def update_urls():
     collection = db[COLLECTION_NAME]
 
     # 1. Find records where ANY relevant field starts with the old domain
+    #query = {
+    #    "$or": [
+    #        {field: {"$regex": f"^{OLD_DOMAIN}"}} for field in FIELDS_TO_CHECK
+    #    ]
+    #}
+    
+    # OR Find records where the fields contain the link ANYWHERE
     query = {
         "$or": [
-            {field: {"$regex": f"^{OLD_DOMAIN}"}} for field in FIELDS_TO_CHECK
+            {field: {"$regex": re.escape(OLD_DOMAIN)}} for field in FIELDS_TO_CHECK
         ]
     }
 
@@ -55,9 +67,10 @@ def update_urls():
         # Check each field (img, background)
         for field in FIELDS_TO_CHECK:
             original_value = doc.get(field)
-            
+            # !! CHANGE HERE FOR DESCRIPTION CLEAN !!
             # Ensure it's a string and starts with the target domain
-            if isinstance(original_value, str) and original_value.startswith(OLD_DOMAIN):
+            #if isinstance(original_value, str) and original_value.startswith(OLD_DOMAIN):
+            if isinstance(original_value, str) and OLD_DOMAIN in original_value:
                 # Replace the domain part only once (count=1)
                 new_value = original_value.replace(OLD_DOMAIN, NEW_DOMAIN, 1)
                 update_fields[field] = new_value

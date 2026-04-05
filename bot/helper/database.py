@@ -123,3 +123,24 @@ class Database:
     
     async def add_btgfiles(self, data):
         result = self.files.insert_many(data)
+    
+    
+    async def add_phrase_to_db(self, phrase: str):
+        """Saves a new phrase to
+            the blacklist collection."""
+    # Use 'update_one' with 'upsert=True' to avoid duplicate entries
+        self.db.blacklist.update_one(
+            {"phrase": phrase}, 
+            {"$set": {"phrase": phrase}}, 
+            upsert=True
+        )
+
+    async def get_all_blacklist_phrases(self):
+        """Retrieves all blacklisted phrases as a list."""
+        phrases = list(self.db.blacklist.find({}))
+        # Return just the strings in a list: ["phrase1", "phrase2"]
+        return [p["phrase"] for p in phrases]
+
+    async def remove_phrase_from_db(self, phrase: str):
+        """Removes a phrase from the blacklist."""
+        self.db.blacklist.delete_one({"phrase": phrase})

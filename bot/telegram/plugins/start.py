@@ -17,6 +17,8 @@ from asyncio import sleep
 from urllib.parse import quote
 from dotenv import load_dotenv
 import httpx
+import math
+import time
 
 
 tmdb_client = httpx.AsyncClient(
@@ -27,6 +29,7 @@ tmdb_client = httpx.AsyncClient(
 load_dotenv("config.env")
 SURF_TG_BASE_URL = os.getenv("BASE_URL", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+AUTH_CHANNEL = os.getenv("AUTH_CHANNEL", "")
 SOURCE_CHANNELS_STR = os.getenv("GROUPS_AND_CHANNELS", "")
 SOURCE_CHANNELS = [
     int(ch.strip()) for ch in SOURCE_CHANNELS_STR.split(",") if ch.strip()
@@ -34,6 +37,34 @@ SOURCE_CHANNELS = [
 
 db = Database()
 
+BLACKLIST_CACHE = []
+cached_blacklist = []
+
+async def reload_blacklist():
+    global BLACKLIST_CACHE
+    # This calls your DB to get all phrases
+    BLACKLIST_CACHE = await db.get_all_blacklist_phrases() 
+    print(f"✅ Blacklist updated: {len(BLACKLIST_CACHE)} phrases loaded.")
+    #cached_blacklist = [p['phrase'] for p in BLACKLIST_CACHE]
+
+def is_blacklisted(message: Message) -> bool:
+    """Returns True if any blacklisted phrase is found in caption or filename."""
+    # Combine caption and filename into one searchable text
+    caption = message.caption or ""
+    # Check video filename or document filename
+    filename = ""
+    if message.video:
+        filename = message.video.file_name or ""
+    elif message.document:
+        filename = message.document.file_name or ""
+        
+    combined_text = f"{caption} {filename}"
+
+    # Check if any phrase exists in the text
+    for phrase in BLACKLIST_CACHE:
+        if phrase in combined_text:
+            return True
+    return False
 
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start(bot: Client, message: Message):
@@ -93,7 +124,6 @@ async def start(bot: Client, message: Message):
         await message.reply(text="Channel is not in AUTH_CHANNEL")
 
 
-
 @StreamBot.on_message(filters.channel & (filters.document | filters.video))
 async def file_receive_handler(bot: Client, message: Message):
     channel_id = message.chat.id
@@ -137,11 +167,14 @@ async def file_receive_handler(bot: Client, message: Message):
             full_desc = (
                 message.caption.strip() if message.caption else file.file_name.strip()
             )
+            full_desc = re.sub(r'https?://\S+','', full_desc)
             # --------------------- NEW POSTER LOGIC -----------------------
             
             tmdb_res = await get_tmdb_details(title, full_desc,TMDB_API_KEY,tmdb_client)
             raw_desc = full_desc
             se,ep = extract_season_episode(full_desc)
+            if title == "האח הגדול" and se:
+                se += 8
             
             poster_url = None
             ep_name = None
@@ -174,15 +207,18 @@ async def file_receive_handler(bot: Client, message: Message):
                     if ep_name:
                         episode_name = ep_name
                     if ep_ow:
+                        if title == "האח הגדול":
+                            se -= 8
                         ep_overview = ep_ow + f"\nS{se:02d}E{ep:02d}"
                     if ep_thumb:
                         thumb_url = ep_thumb                     
-                    if air_date:
-                        released = air_date
+                    
+                    released = air_date
                 else:
                     ep_overview = raw_desc
                     episode_name = title
-                    thumb_url = background_url                            
+                    thumb_url = background_url
+                                                
                      
             #poster_url, background_url = get_tmdb_poster(title,TMDB_API_KEY)
             if poster_url == None:
@@ -234,6 +270,10 @@ async def file_receive_handler(bot: Client, message: Message):
 @UserBot.on_message(filters.chat(SOURCE_CHANNELS))
 async def forward_videos_to_target(bot: Client, message: Message):
     try:
+        if is_blacklisted(message):
+            print(f"   🚫 Blocked by blacklist: {message.id}")
+            return # Exit immediately
+        
         # Get target channel
         AUTH_CHANNEL = await db.get_variable("auth_channel")
         if AUTH_CHANNEL is None or AUTH_CHANNEL.strip() == "":
@@ -244,7 +284,14 @@ async def forward_videos_to_target(bot: Client, message: Message):
             if isinstance(AUTH_CHANNEL, str)
             else str(AUTH_CHANNEL[0])
         )
-        target_id = int(target)
+        #target_id = int(target)
+        raw_id = target.strip()
+        if not raw_id.startswith("-"):
+            # If the ID doesn't start with '-', it's a Channel/Group ID 
+            # missing its prefix. We add -100 for Pyrogram resolution.
+            target_id = int(f"-100{raw_id}")
+        else:
+            target_id = int(raw_id)
         # Check if it's a video or video document
         should_forward = False
         if message.video:
@@ -265,3 +312,240 @@ async def forward_videos_to_target(bot: Client, message: Message):
         import traceback
 
         traceback.print_exc()
+
+
+@UserBot.on_message(filters.command("add_block"))
+async def add_to_blacklist(bot, message):
+    phrase = message.text.split(None, 1)[1]
+    await db.add_phrase_to_db(phrase) # Save to DB
+    await reload_blacklist()         # Update the RAM cache
+    await message.reply(f"🚫 Added '{phrase}' to blacklist.")
+    
+    
+# --- COMMAND: DELETE FROM BLACKLIST ---
+@UserBot.on_message(filters.command("del_block"))
+async def cmd_del_block(bot, message):
+    if len(message.command) < 2:
+        return await message.reply("❌ Usage: `/del_block phrase`")
+    
+    phrase = message.text.split(None, 1)[1]
+    await db.remove_phrase_from_db(phrase)
+    await reload_blacklist() # Update RAM immediately
+    await message.reply(f"🗑️ Removed **'{phrase}'** from the blacklist.")
+
+# --- COMMAND: SHOW BLACKLIST ---
+@UserBot.on_message(filters.command("show_block"))
+async def cmd_show_block(bot, message):
+    if not BLACKLIST_CACHE:
+        return await message.reply("📭 The blacklist is currently empty.")
+    
+    list_text = "🚫 **Current Blacklist:**\n\n"
+    for i, phrase in enumerate(BLACKLIST_CACHE, 1):
+        list_text += f"{i}. `{phrase}`\n"
+    
+    await message.reply(list_text)
+    
+    
+# --- Helper: Progress Bar Function ---
+async def progress_bar(current, total, status_msg, action_name, start_time):
+    """
+    Generates a visual progress bar: [■■■■□□□□] 50.0%
+    Updates every 5 seconds to avoid Telegram rate limits.
+    """
+    now = time.time()
+    # Only update every 5 seconds or when finished
+    if not hasattr(progress_bar, "last_update"):
+        progress_bar.last_update = 0
+        
+    if now - progress_bar.last_update < 5 and current != total:
+        return
+
+    progress_bar.last_update = now
+    
+    percentage = current * 100 / total
+    finished_blocks = int(percentage / 10)
+    remaining_blocks = 10 - finished_blocks
+    
+    bar = "■" * finished_blocks + "□" * remaining_blocks
+    
+    # Calculate speed
+    elapsed_time = now - start_time
+    speed = current / elapsed_time if elapsed_time > 0 else 0
+    speed_kb = speed / 1024
+    
+    text = (
+        f"**{action_name}**\n"
+        f"<code>[{bar}] {percentage:.1f}%</code>\n"
+        f"📊 {current / (1024*1024):.1f}MB / {total / (1024*1024):.1f}MB\n"
+        f"⚡ Speed: {speed_kb:.1f} KB/s"
+    )
+    
+    try:
+        await status_msg.edit(text)
+    except Exception:
+        pass
+
+@UserBot.on_message(filters.command("grab") & filters.me)
+async def grab_batch_restricted(bot: Client, message: Message):
+    # Handle multiple links (split by whitespace/newline)
+    links = message.text.split()[1:]
+    
+    if not links:
+        return await message.reply("❌ Usage: `/grab link1 link2 link3`")
+    
+    main_status = await message.reply(f"🚀 **Batch Started:** Processing {len(links)} files...")
+
+    for index, link in enumerate(links, 1):
+        try:
+            # 1. Parse Link
+            parts = link.rstrip("/").split("/")
+            msg_id = int(parts[-1])
+            
+            if "t.me/c/" in link:
+                c_index = parts.index("c")
+                source_chat_id = int(f"-100{parts[c_index + 1]}")
+            else:
+                tme_index = next(i for i, p in enumerate(parts) if "t.me" in p)
+                source_chat_id = parts[tme_index + 1]
+
+            await main_status.edit(f"📂 **[{index}/{len(links)}]** Fetching message metadata...")
+            target_msg = await bot.get_messages(source_chat_id, msg_id)
+
+            if not target_msg or not target_msg.media:
+                await message.reply(f"⚠️ Skip: Link {index} has no media.")
+                continue
+
+            # 2. Download with Progress Bar
+            start_t = time.time()
+            file_path = await target_msg.download(
+                progress=progress_bar,
+                progress_args=(main_status, f"📥 Downloading File {index}/{len(links)}", start_t)
+            )
+
+            # 3. Resolve Target Auth Channel
+            AUTH_CHANNEL = await db.get_variable("auth_channel")
+            if not AUTH_CHANNEL:
+                AUTH_CHANNEL = Telegram.AUTH_CHANNEL
+            target = AUTH_CHANNEL.split(",")[0].strip() if isinstance(AUTH_CHANNEL, str) else str(AUTH_CHANNEL[0])
+            target_id = int(f"-100{target.strip()}") if not target.strip().startswith("-") else int(target.strip())
+
+            # 4. Upload with Progress Bar
+            start_t = time.time()
+            caption = target_msg.caption or ""
+            
+            if target_msg.video:
+                await bot.send_video(
+                    target_id, video=file_path, caption=caption,
+                    progress=progress_bar,
+                    progress_args=(main_status, f"📤 Uploading File {index}/{len(links)}", start_t)
+                )
+            else:
+                await bot.send_document(
+                    target_id, document=file_path, caption=caption,
+                    progress=progress_bar,
+                    progress_args=(main_status, f"📤 Uploading File {index}/{len(links)}", start_t)
+                )
+
+            # 5. Cleanup
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        except Exception as e:
+            await message.reply(f"❌ Error on link {index}: {e}")
+            continue
+
+    await main_status.edit(f"✅ **Batch Complete!** Processed {len(links)} files.")
+    
+
+@UserBot.on_message(filters.command("grab_range") & filters.me)
+async def grab_range_restricted(bot: Client, message: Message):
+    """
+    Usage: /grab_range [start_link] [end_link]
+    Example: /grab_range https://t.me/c/123/10 https://t.me/c/123/20
+    """
+    args = message.text.split()
+    if len(args) < 3:
+        return await message.reply("❌ Usage: `/grab_range [start_link] [end_link]`")
+
+    try:
+        # 1. Parse IDs from both links
+        start_parts = args[1].rstrip("/").split("/")
+        end_parts = args[2].rstrip("/").split("/")
+        
+        start_id = int(start_parts[-1])
+        end_id = int(end_parts[-1])
+        
+        # Determine Source Channel
+        if "t.me/c/" in args[1]:
+            c_index = start_parts.index("c")
+            source_chat_id = int(f"-100{start_parts[c_index + 1]}")
+        else:
+            tme_index = next(i for i, p in enumerate(start_parts) if "t.me" in p)
+            source_chat_id = start_parts[tme_index + 1]
+
+        if start_id > end_id:
+            return await message.reply("❌ Start ID must be smaller than End ID.")
+
+        total_to_check = (end_id - start_id) + 1
+        main_status = await message.reply(f"🔍 Checking range: `{start_id}` to `{end_id}` ({total_to_check} IDs)...")
+
+        success_count = 0
+        
+        # 2. Loop through the numerical range
+        for current_id in range(start_id, end_id + 1):
+            try:
+                # We update the status so you know the bot hasn't frozen
+                await main_status.edit(f"🛰️ Scanning ID: `{current_id}`\n✅ Found: {success_count} videos so far.")
+                
+                target_msg = await bot.get_messages(source_chat_id, current_id)
+                
+                # --- THE "GAP" FILTER ---
+                # Skip if message is empty, deleted, or has no video/document
+                if not target_msg or target_msg.empty or not target_msg.media:
+                    continue 
+                
+                # Check if it's actually a video or video-document
+                is_video = target_msg.video or (
+                    target_msg.document and 
+                    (target_msg.document.mime_type or "").startswith("video/")
+                )
+                
+                if not is_video:
+                    continue
+
+                # 3. If we pass the filters, start the Bridge Process
+                start_t = time.time()
+                file_path = await target_msg.download(
+                    progress=progress_bar,
+                    progress_args=(main_status, f"📥 Downloading ID {current_id}", start_t)
+                )
+
+                # Target Resolution
+                AUTH_CHANNEL = await db.get_variable("auth_channel") or Telegram.AUTH_CHANNEL
+                target = AUTH_CHANNEL.split(",")[0].strip() if isinstance(AUTH_CHANNEL, str) else str(AUTH_CHANNEL[0])
+                target_id = int(f"-100{target.strip()}") if not target.strip().startswith("-") else int(target.strip())
+
+                start_t = time.time()
+                caption = target_msg.caption or ""
+                
+                await bot.send_video(
+                    target_id, video=file_path, caption=caption,
+                    progress=progress_bar,
+                    progress_args=(main_status, f"📤 Uploading ID {current_id}", start_t)
+                )
+
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                
+                success_count += 1
+                # Small sleep to avoid aggressive flood waits
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                print(f"⚠️ Error on ID {current_id}: {e}")
+                continue
+
+        await main_status.edit(f"✅ **Range Complete!**\nScanned: {total_to_check} IDs\nSuccessfully Bridged: {success_count} videos.")
+
+    except Exception as e:
+        await message.reply(f"❌ Range Error: {e}")

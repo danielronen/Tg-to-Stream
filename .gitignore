@@ -14,3 +14,8 @@ update_db.py
 stremio.py
 channels.py
 tmdb_response.py
+tvdb_test.py
+tvdb_res.json
+tmdb_response.json
+one_piece.py
+reboot_update.py

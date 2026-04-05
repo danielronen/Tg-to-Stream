@@ -75,6 +75,53 @@ def extract_season_episode(description):
     
     return None, None
 
+def clean_hebrew_title(text):
+    if not text:
+        return ""
+
+    # 0. High Priority Split (Isolate title from description/details)
+    # Added ':' for Hebrew captions that use 'Title: Description'
+    text = re.split(r"[#|•,/\[\(:/]", text)[0].strip()
+
+    # 1. Clean Delimiters & Telegram emojis
+    text = re.sub(r"[._\-\[\]\(\)↙️👥]", " ", text)
+    
+    # 2. Preserve only Hebrew, English, and Numbers
+    text = re.sub(r"[^א-תa-zA-Z0-9\s'\"\u05F3\u05F4]", " ", text)
+
+    # 3. Technical Tags & File Extensions
+    tech_pattern = r"\b(4K|2160p|1080|1080p|720p|480p|DVD|DVDRip|BluRay|BRRip|WEB-?DL|WeDdl|HDTV|WEB|h\s?264|x265|x26?4|HEVC|ENG|HB|DL|Rw|heb|https?|www|com|net|org|mp4|mkv|avi|x264)\b"
+    text = re.sub(tech_pattern, "", text, flags=re.IGNORECASE)
+
+    # 4. Dates & Years
+    text = re.sub(r"\b\d{2,4}\s\d{2}\s\d{2}\b", "", text) # 26 01 2026
+    text = re.sub(r"\b(19|20)\d{2}\b", "", text)         # 2024
+
+    # 5. Group Names (Specific to your examples)
+    groups = [
+        r"זירה מדיה", r"ז\.מ", r"דב סרטים", r"שלמה סרטים", 
+        r"ע י", r"הועלה", r"לולו סרטים", r"שבי גוזלן", 
+        r"למבורגיני", r"גוזלן", r"נתי מדיה", r"איכות ערוץ", 
+        r"צפייה ישירה", r"איכות", r"ערוץ", r"Yonidan",r"מתורגם", r"תיקון סנכרון", r"תרגום מובנה", r"מדובב", r"מקורי",
+        r"Premiumcontentil", r"ISrTeLeG", r"אחרון לעונה",
+    ]
+    for group in groups:
+        text = re.sub(group, "", text, flags=re.IGNORECASE)
+
+    # 6. Season/Episode (Handles 'ע1', 'עונה 1', 'S01E01')
+    text = re.sub(r"\bע(ונה)?\s*\d*\b", " ", text)
+    text = re.sub(r"\bפ(רק)?\s*\d*\b", " ", text)
+    text = re.sub(r"s\d{1,2}e\d{1,2}", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b[עפ]\d+\b", " ", text)
+
+    # 7. Final Polish
+    
+    text = re.sub(r'(^["\']|["\']$|(?<=\s)["\']|["\'](?=\s))', '', text)
+    text = re.sub(r"\b[a-zA-Z]\b", " ", text) # Remove single English letters
+    text = re.sub(r"\s+", " ", text).strip()
+    
+    return text
+
 async def get_tmdb_details(title, description, tmdb_api_key, client: httpx.AsyncClient):
     """
     High-performance async TMDB search with context-aware matching and cache stampede protection.
@@ -179,7 +226,8 @@ async def get_tmdb_ep_det(tmdb_id, season, ep, tmdb_api_key, client: httpx.Async
             data = response.json()
             raw_name = data.get("name", "")
             episode_name = None
-            if raw_name and not any(raw_name.startswith(x) for x in ["פרק", "Episode"]):
+            is_generic = bool(re.match(r"^(פרק|Episode)\s*\d+", raw_name, re.IGNORECASE))
+            if raw_name and not is_generic:
                 episode_name = raw_name
             # 2. Overview Logic
             overview = data.get("overview") if data.get("overview") else None           
@@ -203,293 +251,6 @@ async def fetch_message(chat_id, message_id):
         return message
     except Exception as e:
         return None
-
-def clean_hebrew_title(text):
-    if not text:
-        return ""
-
-    # 0. High Priority Split (Isolate title from description/details)
-    # Added ':' for Hebrew captions that use 'Title: Description'
-    text = re.split(r"[|•,/\[\(:/]", text)[0].strip()
-
-    # 1. Clean Delimiters & Telegram emojis
-    text = re.sub(r"[._\-\[\]\(\)↙️👥]", " ", text)
-    
-    # 2. Preserve only Hebrew, English, and Numbers
-    text = re.sub(r"[^א-תa-zA-Z0-9\s'\"\u05F3\u05F4]", " ", text)
-
-    # 3. Technical Tags & File Extensions
-    tech_pattern = r"\b(4K|2160p|1080|1080p|720p|480p|DVD|DVDRip|BluRay|BRRip|WEB-?DL|WeDdl|HDTV|WEB|h\s?264|x265|x26?4|HEVC|ENG|HB|DL|Rw|heb|https?|www|com|net|org|mp4|mkv|avi|x264)\b"
-    text = re.sub(tech_pattern, "", text, flags=re.IGNORECASE)
-
-    # 4. Dates & Years
-    text = re.sub(r"\b\d{2,4}\s\d{2}\s\d{2}\b", "", text) # 26 01 2026
-    text = re.sub(r"\b(19|20)\d{2}\b", "", text)         # 2024
-
-    # 5. Group Names (Specific to your examples)
-    groups = [
-        r"זירה מדיה", r"ז\.מ", r"דב סרטים", r"שלמה סרטים", 
-        r"ע י", r"הועלה", r"לולו סרטים", r"שבי גוזלן", 
-        r"למבורגיני", r"גוזלן", r"נתי מדיה", r"איכות ערוץ", 
-        r"צפייה ישירה", r"איכות", r"ערוץ", r"Yonidan",r"מתורגם", r"תיקון סנכרון", r"תרגום מובנה", r"מדובב", r"מקורי",
-        r"Premiumcontentil", r"ISrTeLeG", r"אחרון לעונה",
-    ]
-    for group in groups:
-        text = re.sub(group, "", text, flags=re.IGNORECASE)
-
-    # 6. Season/Episode (Handles 'ע1', 'עונה 1', 'S01E01')
-    text = re.sub(r"\bע(ונה)?\s?\d*\b", " ", text)
-    text = re.sub(r"\bפ(רק)?\s?\d*\b", " ", text)
-    text = re.sub(r"s\d{1,2}e\d{1,2}", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b[עפ]\d+\b", " ", text)
-
-    # 7. Final Polish
-    text = re.sub(r"\b[a-zA-Z]\b", " ", text) # Remove single English letters
-    text = re.sub(r"\s+", " ", text).strip()
-    
-    return text
-
-async def get_messages1(chat_id, first_message_id, last_message_id, batch_size=50):
-    messages = []
-    
-    # Get all existing msg_ids for this chat in ONE query
-    existing_msg_ids = set(
-        doc['msg_id'] 
-        for doc in db.files.find(
-            {"chat_id": str(chat_id)}, 
-            {"msg_id": 1, "_id": 0}
-        )
-    )
-    print(f"📊 Found {len(existing_msg_ids)} existing messages in database")
-    
-    # Calculate which message IDs we need to fetch
-    all_msg_ids = set(range(first_message_id, last_message_id + 1))
-    missing_msg_ids = sorted(all_msg_ids - existing_msg_ids)
-    
-    print(f"🔍 Need to fetch {len(missing_msg_ids)} missing message IDs (skipping {len(existing_msg_ids)} duplicates)")
-    
-    non_video_count = 0
-    current_idx = 0
-    
-    # ✨ NEW: Collect all messages first (without TMDB calls)
-    raw_messages = []
-    
-    # Process only missing messages in batches
-    while current_idx < len(missing_msg_ids):
-        batch_msg_ids = missing_msg_ids[current_idx:current_idx + batch_size]
-        
-        tasks = [fetch_message(chat_id, msg_id) for msg_id in batch_msg_ids]
-        batch_messages = await gather(*tasks)
-        
-        for message in batch_messages:
-            if message:
-                if file := message.video or message.document:
-                    # Extract basic info (no TMDB calls yet)
-                    if message.caption:
-                        clean_caption = message.caption.strip().split("\n")[0]
-                        clean_caption = clean_hebrew_title(clean_caption)
-                        if len(clean_caption) > 33:
-                            title = clean_caption[:33].rsplit(" ", 1)[0]
-                        else: 
-                            title = clean_caption
-                    else:
-                        raw_fn = file.file_name or ""
-                        title, _ = splitext(raw_fn)
-                        is_default = any(
-                            x in title.lower()
-                            for x in ["default_name", "default name", "undefined", "index"]
-                        )
-                        
-                        if not is_default and title:
-                            title = clean_hebrew_title(title)
-                            if len(title) > 33:
-                                title = title[:33].rsplit(" ", 1)[0]
-                    
-                    if not title:
-                        title = f"Video {message.id}"
-                    
-                    if message.caption:
-                        raw_desc = str(message.caption)
-                        full_desc = str(message.caption)
-                    else:
-                        raw_desc = str(file.file_name or "")
-                        full_desc = str(file.file_name or "")
-                    
-                    # Store raw message data (no TMDB yet)
-                    raw_messages.append({
-                        'message': message,
-                        'file': file,
-                        'title': title,
-                        'raw_desc': raw_desc,
-                        'full_desc': full_desc
-                    })
-                else:
-                    non_video_count += 1
-        
-        current_idx += batch_size
-    
-    print(f"📦 Collected {len(raw_messages)} videos, now fetching TMDB data in parallel...")
-    
-    # ✨ NEW: Batch TMDB calls - ALL AT ONCE
-    tmdb_tasks = []
-    for raw_msg in raw_messages:
-        task = get_tmdb_details(
-            raw_msg['title'], 
-            raw_msg['full_desc'], 
-            TMDB_API_KEY, 
-            tmdb_client
-        )
-        tmdb_tasks.append(task)
-    
-    # Execute ALL TMDB calls in parallel
-    tmdb_results = await gather(*tmdb_tasks, return_exceptions=True)
-    
-    print(f"✅ Fetched {len(tmdb_results)} TMDB results")
-    
-    # ✨ NEW: Now process TMDB episode details in parallel
-    episode_tasks = []
-    episode_indices = []
-    
-    for idx, (raw_msg, tmdb_res) in enumerate(zip(raw_messages, tmdb_results)):
-        # Handle errors
-        if isinstance(tmdb_res, Exception):
-            tmdb_res = None
-        
-        se, ep = extract_season_episode(raw_msg['full_desc'])
-        
-        if tmdb_res and (ep or se) and tmdb_res.get("media_type") == "tv":
-            tmdb_id = tmdb_res.get("id")
-            task = get_tmdb_ep_det(tmdb_id, se, ep, TMDB_API_KEY, tmdb_client)
-            episode_tasks.append(task)
-            episode_indices.append(idx)
-    
-    # Execute ALL episode calls in parallel
-    if episode_tasks:
-        print(f"🎬 Fetching {len(episode_tasks)} episode details in parallel...")
-        episode_results = await gather(*episode_tasks, return_exceptions=True)
-    else:
-        episode_results = []
-    
-    # ✨ NEW: Build final messages with all data
-    print(f"🔨 Building final message objects...")
-    
-    # Map episode results back to their messages
-    episode_data_map = {}
-    for idx, ep_idx in enumerate(episode_indices):
-        if idx < len(episode_results):
-            episode_data_map[ep_idx] = episode_results[idx]
-    
-    for idx, (raw_msg, tmdb_res) in enumerate(zip(raw_messages, tmdb_results)):
-        message = raw_msg['message']
-        file = raw_msg['file']
-        title = raw_msg['title']
-        raw_desc = raw_msg['raw_desc']
-        full_desc = raw_msg['full_desc']
-        
-        # Handle TMDB errors
-        if isinstance(tmdb_res, Exception):
-            tmdb_res = None
-        
-        se, ep = extract_season_episode(full_desc)
-        episode_name = None
-        ep_name = None
-        ep_overview = None
-        thumb_url = None
-        poster_url = None
-        background_url = None
-        released = None
-        
-        # Process TMDB main data
-        if tmdb_res:
-            tmdb_id = tmdb_res.get("id")
-            media_type = tmdb_res.get("media_type")
-            p_path = tmdb_res.get("poster_path")
-            b_path = tmdb_res.get("backdrop_path")
-            overv = tmdb_res.get("overview")
-            
-            if p_path and b_path:
-                background_url = f"https://image.tmdb.org/t/p/w1280{b_path}"
-                poster_url = f"https://image.tmdb.org/t/p/w500{p_path}"
-            elif p_path:
-                background_url = f"https://image.tmdb.org/t/p/w1280{p_path}"
-                poster_url = f"https://image.tmdb.org/t/p/w500{p_path}"
-            
-            if overv:
-                full_desc = overv
-            
-            if tmdb_res.get("release_date"):
-                released = tmdb_res.get("release_date")
-            if tmdb_res.get("first_air_date"):
-                released = tmdb_res.get("first_air_date")
-            
-            # Get episode data if it was fetched
-            if idx in episode_data_map:
-                ep_result = episode_data_map[idx]
-                
-                # Handle errors
-                if not isinstance(ep_result, Exception) and ep_result:
-                    ep_name, ep_ow, ep_thumb, air_date = ep_result
-                    
-                    if ep_name:
-                        episode_name = ep_name
-                    if ep_ow:
-                        ep_overview = ep_ow + f"\nS{se:02d}E{ep:02d}"
-                    if ep_thumb:
-                        thumb_url = ep_thumb
-                    if air_date:
-                        released = air_date
-            else:
-                # Not a TV episode or no S/E info
-                ep_overview = raw_desc
-                if not episode_name:
-                    episode_name = title
-                thumb_url = background_url
-        
-        # Fallbacks for poster/thumbnail
-        if poster_url == None:
-            has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-            if has_real_thumb:
-                poster_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-                background_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-            else:
-                clean_t = quote(title)
-                poster_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-                background_url = f"https://placehold.jp/40/1a1a2e/ffffff/600x900.png?text={clean_t}"
-        
-        if not thumb_url:
-            has_real_thumb = hasattr(file, "thumbs") and file.thumbs
-            if has_real_thumb:
-                thumb_url = f"{SURF_TG_BASE_URL}/api/thumb/{chat_id}?id={message.id}"
-        
-        if not episode_name:
-            episode_name = title
-        if not ep_overview:
-            ep_overview = raw_desc
-        
-        if not released:
-            released = datetime.now().strftime("%Y-%m-%d")
-        
-        messages.append({
-            "msg_id": message.id,
-            "title": title,
-            "description": full_desc,
-            "hash": file.file_unique_id,
-            "size": get_readable_file_size(file.file_size),
-            "type": file.mime_type,
-            "chat_id": str(chat_id),
-            "img": poster_url,
-            "background": background_url,
-            "ep_ow": ep_overview,
-            "ep_name": episode_name,
-            "thumbnail": thumb_url,
-            "released": released
-        })
-    
-    print(f"✅ Processed {len(messages)} new video files")
-    print(f"⏭️  Skipped {len(existing_msg_ids)} already indexed")
-    print(f"📝 Skipped {non_video_count} non-video messages")
-    
-    return messages
 
 async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50):
     messages = []
@@ -551,6 +312,7 @@ async def get_messages(chat_id, first_message_id, last_message_id, batch_size=50
                     title = f"Video {msg.id}"
                 
                 full_desc = str(msg.caption) if msg.caption else str(file.file_name or "")
+                full_desc = re.sub(r'https?://\S+','', full_desc)
                 
                 raw_messages.append({
                     'message': msg,
@@ -634,7 +396,7 @@ async def process_metadata_batch(batch_data, chat_id):
                     if ep_name: episode_name = ep_name
                     if ep_ow: ep_overview = ep_ow + f"\nS{se:02d}E{ep:02d}"
                     if ep_thumb: thumb_url = ep_thumb
-                    if air_date: released = air_date
+                    released = air_date
             else:
                 if not episode_name: episode_name = title
                 ep_overview, thumb_url = raw_desc, background_url
@@ -652,7 +414,8 @@ async def process_metadata_batch(batch_data, chat_id):
         
         if not episode_name: episode_name = title
         if not ep_overview: ep_overview = raw_desc
-        
+        full_desc = re.sub(r'https?://\S+','', full_desc)
+
         # --- YOUR ORIGINAL DEFAULT DATE LOGIC ---
         if not released:
             released = datetime.now().strftime("%Y-%m-%d")

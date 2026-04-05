@@ -53,10 +53,10 @@ def build_manifest():
     
     return {
         "id": "community.surftg.series",  
-        "version": "3.2.0",
+        "version": "3.2.1",
         "name": ADDON_NAME,
         "description": "Stream your Telegram videos as Series, Movies and TV Catchup", 
-        "resources": ["catalog", "stream", "meta"],
+        "resources": ["catalog", "stream", "meta","subtitles"],
         "types": ["series", "movie"],  
         "catalogs": [
             # 1. TV Series - Only series with seasons/episodes
@@ -543,6 +543,19 @@ async def meta(request):
             
             # Build episode list
             videos = []
+            existing_seasons = list(videos_by_season.keys())
+            if len(existing_seasons) == 1 and 1 not in existing_seasons:
+                videos.append({
+                    "id": "surftg_dummy_s1",
+                    "title": "⚠️ Select Season via Dropdown",
+                    "season": 1,
+                    "episode": 1,
+                    "overview": f"Season 1 is not available. Please use the season selector to view Season {existing_seasons[0]}.",
+                    "released": "2000-01-01T00:00:00.000Z",
+                    "thumbnail": "https://placehold.co/600x400/000000/FFFFFF/png?text=Select+Another+Season"
+                })
+            
+            
             for season in sorted(videos_by_season.keys()):
                 for ep_data in sorted(videos_by_season[season], key=lambda x: x['episode']):
                     video = ep_data['video']
@@ -643,6 +656,8 @@ async def meta(request):
 async def stream(request):
     try:
         video_id = request.path_params["id"]
+        if video_id == "surftg_dummy_s1":
+            return JSONResponse({"streams":[]})
         msg_id_str = video_id.replace("surftg_", "").replace("movie_", "").replace("series_", "")
         collection = db[find_video_collection()]
         
@@ -679,18 +694,28 @@ async def stream(request):
         title_parts.append(f"💾 {size}")
         stream_title = "\n".join(title_parts)
         
+        # --- NEW SUBTITLE LOGIC ---
+        # 1. Fetch the subtitles array from your database record (default to empty list)
+        db_subtitles = video_doc.get("subtitles", [])
+        
+        # 2. Build the main stream object
+        stream_obj = {
+            "url": stream_url,
+            "title": stream_title,
+            "name": title,
+            "behaviorHints": {
+                "bingeGroup": "surftg-auto-play"
+            }
+        }
+        
+        # 3. If subtitles exist in the DB, attach them to the stream object
+        if db_subtitles:
+            stream_obj["subtitles"] = db_subtitles
+
+        # 4. Return the modified stream object
         return JSONResponse(
             {
-                "streams": [
-                    {
-                        "url": stream_url,
-                        "title": stream_title,
-                        "name": title,
-                        "behaviorHints": {
-                            "bingeGroup": "surftg-auto-play"
-                        }
-                    }
-                ]
+                "streams": [stream_obj]
             },
             headers={
                 "Access-Control-Allow-Origin": "*",
@@ -698,6 +723,7 @@ async def stream(request):
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             },
         )
+        
     
     except Exception as e:
         print(f"❌ Stream Error: {e}")
