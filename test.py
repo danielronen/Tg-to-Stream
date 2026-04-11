@@ -53,7 +53,7 @@ def build_manifest():
     
     return {
         "id": "community.surftg.series",  
-        "version": "3.2.1",
+        "version": "3.2.2",
         "name": ADDON_NAME,
         "description": "Stream your Telegram videos as Series, Movies and TV Catchup", 
         "resources": ["catalog", "stream", "meta","subtitles"],
@@ -93,7 +93,7 @@ def build_manifest():
                 ],
             }
         ],
-        "idPrefixes": ["surftg_"],
+        "idPrefixes": ["surftg_", "tt", "tmdb:"],
         "behaviorHints": {"configurable": False, "configurationRequired": False},
     }
 
@@ -653,7 +653,7 @@ async def meta(request):
         traceback.print_exc()
         return JSONResponse({"meta": {}})
 
-async def stream(request):
+async def stream2(request):
     try:
         video_id = request.path_params["id"]
         if video_id == "surftg_dummy_s1":
@@ -725,6 +725,116 @@ async def stream(request):
         )
         
     
+    except Exception as e:
+        print(f"❌ Stream Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"streams": []})
+
+
+
+async def stream(request):
+    try:
+        video_id = request.path_params["id"]
+        
+        # 1. Handle Dummy Request
+        if video_id == "surftg_dummy_s1":
+            return JSONResponse({"streams":[]})
+            
+        collection = db[find_video_collection()]
+        query = {}
+
+        # 2. Parse the ID to build the MongoDB query
+        # Case A: External Catalog (IMDb) -> tt12345 or tt12345:1:1
+        if video_id.startswith("tt"):
+            parts = video_id.split(":")
+            query["imdb_id"] = parts[0]
+            if len(parts) == 3:
+                se_string = f"S{int(parts[1]):02d}E{int(parts[2]):02d}"
+                query["ep_ow"] = {"$regex": se_string, "$options": "i"}
+
+        # Case B: External Catalog (TMDB) -> tmdb:12345 or tmdb:tv:12345:1:1
+        elif video_id.startswith("tmdb:"):
+            clean_id = video_id.replace("tmdb:", "")
+            parts = clean_id.split(":")
+            
+            if parts[0] in ["movie", "tv"]:
+                tmdb_val = int(parts[1])
+                s_idx, e_idx = 2, 3
+            else:
+                tmdb_val = int(parts[0])
+                s_idx, e_idx = 1, 2
+                
+            query["tmdb_id"] = tmdb_val
+            if len(parts) > s_idx:
+                se_string = f"S{int(parts[s_idx]):02d}E{int(parts[e_idx]):02d}"
+                query["ep_ow"] = {"$regex": se_string, "$options": "i"}
+
+        # Case C: Internal Catalog -> surftg_12345
+        else:
+            msg_id_str = video_id.replace("surftg_", "").replace("movie_", "").replace("series_", "")
+            if msg_id_str.isdigit():
+                # Check for both string and integer versions in one go
+                query["msg_id"] = {"$in": [msg_id_str, int(msg_id_str)]}
+            else:
+                query["msg_id"] = msg_id_str
+
+        # 3. Execute the database search
+        video_doc = collection.find_one(query, {"_id": 0})
+        
+        if not video_doc:
+            return JSONResponse({"streams": []})
+        
+        # 4. Generate Stream Data (Your original logic)
+        stream_url = generate_stream_url(video_doc)
+        title = video_doc.get("title", "Unknown")
+        size = video_doc.get("size", "")
+        description = video_doc.get("description", "")
+        ep_overview = video_doc.get("ep_ow", "")
+        
+        # Add channel info to stream title
+        channel = detect_channel(title, description)
+        season, episode = extract_season_episode(ep_overview)
+        
+        title_parts = []
+        if channel:
+            title_parts.append(f"📡 {channel}")
+        
+        if season and episode:
+            title_parts.append(f"{title} | S{season:02d}E{episode:02d}")
+        else:
+            title_parts.append(title)
+        
+        title_parts.append(f"💾 {size}")
+        stream_title = "\n".join(title_parts)
+        
+        # 5. Subtitle Logic
+        db_subtitles = video_doc.get("subtitles", [])
+        
+        stream_obj = {
+            "url": stream_url,
+            "title": stream_title,
+            "name": title,
+            "behaviorHints": {
+                "bingeGroup": "surftg-auto-play"
+            }
+        }
+        
+        if db_subtitles:
+            stream_obj["subtitles"] = db_subtitles
+
+        # 6. Return Response
+        return JSONResponse(
+            {
+                "streams": [stream_obj]
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            },
+        )
+        
     except Exception as e:
         print(f"❌ Stream Error: {e}")
         import traceback

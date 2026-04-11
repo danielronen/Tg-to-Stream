@@ -18,4 +18,5 @@ tvdb_test.py
 tvdb_res.json
 tmdb_response.json
 one_piece.py
-reboot_update.py
+reboots_update.py
+imdb_update.py

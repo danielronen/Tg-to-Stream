@@ -182,10 +182,23 @@ async def file_receive_handler(bot: Client, message: Message):
             ep_overview = None
             background_url = None
             released = None
+            tmdb_id = None
+            imdb_id = None
             
             if tmdb_res:
                 tmdb_id = tmdb_res.get("id")
                 media_type = tmdb_res.get("media_type")
+                
+                # Quickly fetch the external IMDb ID using the existing client
+                if tmdb_id and media_type:
+                    try:
+                        ext_url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/external_ids?api_key={TMDB_API_KEY}"
+                        ext_resp = await tmdb_client.get(ext_url)
+                        if ext_resp.status_code == 200:
+                            imdb_id = ext_resp.json().get("imdb_id")
+                    except Exception as e:
+                        print(f"⚠️ Failed to fetch IMDb ID for {tmdb_id}: {e}")
+                        
                 p_path = tmdb_res.get("poster_path")
                 b_path = tmdb_res.get("backdrop_path")
                 overview = tmdb_res.get("overview")
@@ -259,7 +272,9 @@ async def file_receive_handler(bot: Client, message: Message):
                 ep_overview=ep_overview,
                 ep_name=episode_name,
                 thumb_url=thumb_url,
-                released=released
+                released=released,
+                tmdb_id=tmdb_id,
+                imdb_id=imdb_id
                 
             )
 
